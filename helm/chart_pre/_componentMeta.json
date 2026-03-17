@@ -1,0 +1,22 @@
+{
+    "conponentDefineType": "helm/task",
+    "name": "dm-pre",
+    "configSchema": {
+        "title": "dm-pre",
+        "description": "数据库操作前置阶段任务组件",
+        "type": "object",
+        "properties": {
+            "onlineUpgrade": {
+                "type": "boolean",
+                "title": "关系数据库数据模型在线变更",
+                "default": false
+            }
+        },
+        "timeout": 1800
+    },
+    "dependence": [
+        {
+            "name": "rds"
+        }
+    ]
+}

@@ -1,0 +1,1 @@
+select DISTINCT OWNER from all_tables;
