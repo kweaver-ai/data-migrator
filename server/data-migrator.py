@@ -1,56 +1,80 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Data Migrator - 统一入口
+支持三个子命令: migrate, collect, check
+"""
 import argparse
+import sys
+import os
 
-from dataModelManagement.src.command.migrations_cli import set_migration_cmd
-from dataModelManagement.src.command.verification_cli import set_verification_cmd
-from dataModelManagement.src.handler.handler import Handler
+# 将 server/ 所在目录加入 sys.path，以支持 from server.xxx import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def cli():
-    parser = argparse.ArgumentParser(description='Database schema change tool', prog='data-model-management [options]  [command] [sub-options]')
-    parser.add_argument('-u', '--username', help='database user, It is best to have root privileges', required=False)
-    parser.add_argument('-p', '--password', help='database account password', required=False)
-    parser.add_argument('-P', '--port', help='database port', required=False)
-    parser.add_argument('-H', '--host', help='database host', required=False)
-    parser.add_argument('-t', '--type', help='database type', required=False)
-    parser.add_argument('-ak', '--admin_key', help='database admin_key', required=False)
-    parser.add_argument('-sdp', '--script_directory_path', help='Path to pass in upgrade script, [default] /app/repos/', required=False)
-    parser.add_argument('-em', '--env_mode', help='is_production, prod, dev or tiduyun', required=False)
-    parser.add_argument('-l', '--log_level', help='set log level', required=False)
-    parser.add_argument('-sid', '--system_id', help='set system_id for db name', required=False)
-    parser.add_argument('-st', '--source_type', help='set db source type', required=False)
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="data-migrator",
+        description="数据库迁移引擎：迁移 / 收集 / 校验",
+    )
+    subparsers = parser.add_subparsers(dest="command", help="子命令")
 
-    subparsers = parser.add_subparsers(dest='subcommand', title='subcommands', description='subcommands')
-    set_migration_cmd(subparsers)
-    set_verification_cmd(subparsers)
-    subparsers.add_parser("version", help="gitcommit version")
-    args = parser.parse_args()
+    # ── migrate ──
+    migrate_parser = subparsers.add_parser("migrate", help="执行数据库初始化和升级迁移")
+    migrate_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    migrate_parser.add_argument("--service", nargs="*", default=None, help="指定本次迁移的服务（默认全部）")
+    migrate_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
-    if args.subcommand == 'migrations':
-        print("Running the set_migration_cmd...")
-    elif args.subcommand == 'verification':
-        print("Rerunning the set_verification_cmd...")
+    # ── collect ──
+    collect_parser = subparsers.add_parser("collect", help="从 Git 仓库拉取并收集迁移脚本")
+    collect_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    collect_parser.add_argument("--service", nargs="*", default=None, help="指定本次收集的服务（默认全部）")
+    collect_parser.add_argument("--log-level", default="INFO", help="日志级别")
+
+    # ── check ──
+    check_parser = subparsers.add_parser("check", help="校验迁移脚本目录结构和 SQL 语法")
+    check_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    check_parser.add_argument("--service", nargs="*", default=None, help="指定本次校验的服务（默认全部）")
+    check_parser.add_argument("--log-level", default="INFO", help="日志级别")
+
     return parser
 
 
-def codebase_version():
-    return "unknow"
-
 def main():
-    cli_info = cli()
-    parse_args = cli_info.parse_args()
-    if not parse_args.subcommand:
-        cli_info.print_help()
-        return
-    elif parse_args.subcommand == 'version':
-        commit_id = codebase_version()
-        print(f"commit_id: {commit_id}")
-    elif parse_args.subcommand == 'verification':
-        Handler(parse_args).verification_run()
-    else:
-        Handler(parse_args).migration_run()
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(1)
+
+    from server.utils.log import LogDiy
+    logger = LogDiy.instance().get_logger(args.log_level)
+
+    if args.command == "migrate":
+        from server.config.loader import load_config
+        app_config = load_config(args.config, args.service, logger)
+
+        from server.migrate.executor import MigrationExecutor
+        executor = MigrationExecutor(app_config, logger)
+        executor.run()
+
+    elif args.command == "collect":
+        from server.config.loader import load_config
+        app_config = load_config(args.config, args.service, logger)
+
+        from server.collect.collector import run_collect
+        run_collect(app_config, logger)
+
+    elif args.command == "check":
+        from server.config.loader import load_config
+        app_config = load_config(args.config, args.service, logger)
+
+        from server.check.repo_checker import run_check_repo
+        from server.check.schema_checker import run_check_schema
+        run_check_repo(app_config, logger)
+        run_check_schema(app_config, logger)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

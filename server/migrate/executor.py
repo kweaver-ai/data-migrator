@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""迁移主循环
+
+流程：
+  1. 自建 deploy 表 (CREATE TABLE IF NOT EXISTS)
+  2. 处理服务改名
+  3. 遍历服务:
+     - 注册任务 (INSERT/UPDATE task)
+     - 选择脚本 (script_selector)
+     - 逐个执行 (幂等预检 + SQL/PY 执行)
+     - 记录历史 (history)
+     - 更新状态
+"""
+import os
+import subprocess
+import sys
+from logging import Logger
+
+from server.config.models import AppConfig
+from server.db.operate import OperateDB
+from server.db.dialect.factory import create_dialect
+from server.migrate.task_manager import TaskManager
+from server.migrate.history_manager import HistoryManager
+from server.migrate.script_selector import ScriptSelector
+from server.migrate.idempotency import IdempotencyChecker
+from server.utils.sql import parse_sql_file
+
+
+# deploy 管控表 DDL
+CREATE_TASK_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS {deploy_db}.schema_migration_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_name VARCHAR(255) NOT NULL,
+    installed_version VARCHAR(64) NOT NULL DEFAULT '',
+    target_version VARCHAR(64) NOT NULL DEFAULT '',
+    script_file_name VARCHAR(512) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL
+)
+"""
+
+CREATE_HISTORY_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS {deploy_db}.schema_migration_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    service_name VARCHAR(255) NOT NULL,
+    version VARCHAR(64) NOT NULL DEFAULT '',
+    script_file_name VARCHAR(512) NOT NULL DEFAULT '',
+    checksum VARCHAR(128) NOT NULL DEFAULT '',
+    status VARCHAR(32) NOT NULL DEFAULT 'success',
+    create_time DATETIME NOT NULL
+)
+"""
+
+
+class MigrationExecutor:
+    def __init__(self, app_config: AppConfig, logger: Logger):
+        self.app_config = app_config
+        self.logger = logger
+        self.operate_db = OperateDB(app_config.rds, logger)
+        self.dialect = create_dialect(app_config.rds, logger)
+        self.task_mgr = TaskManager(app_config.rds, logger)
+        self.history_mgr = HistoryManager(app_config.rds, logger)
+        self.script_selector = ScriptSelector(app_config, logger)
+        self.idempotency = IdempotencyChecker(self.operate_db, self.dialect, logger)
+        self.deploy_db = app_config.rds.get_deploy_db_name()
+
+    def run(self):
+        """迁移主入口"""
+        self.logger.info("========== 开始数据迁移 ==========")
+
+        # 1. 自建 deploy 表
+        self._ensure_deploy_tables()
+
+        # 2. 服务改名
+        self._handle_renamed_services()
+
+        # 3. 遍历服务
+        services = self._list_services()
+        for service_name in services:
+            try:
+                self._migrate_service(service_name)
+            except Exception as ex:
+                self.logger.error(f"[{service_name}] 迁移失败: {ex}")
+                sys.exit(1)
+
+        self.logger.info("========== 数据迁移完成 ==========")
+
+    def _ensure_deploy_tables(self):
+        """确保 deploy 库和管控表存在"""
+        self.logger.info(f"确保 deploy 库存在: {self.deploy_db}")
+        create_db_sql = self.dialect.CREATE_DATABASE_SQL.format(db_name=self.deploy_db)
+        try:
+            self.operate_db.run_ddl([create_db_sql])
+        except Exception:
+            self.logger.info(f"deploy 库可能已存在: {self.deploy_db}")
+
+        task_ddl = CREATE_TASK_TABLE_SQL.format(deploy_db=self.deploy_db)
+        history_ddl = CREATE_HISTORY_TABLE_SQL.format(deploy_db=self.deploy_db)
+        self.operate_db.run_ddl([task_ddl])
+        self.operate_db.run_ddl([history_ddl])
+        self.logger.info("deploy 管控表就绪")
+
+    def _handle_renamed_services(self):
+        """处理服务改名"""
+        for item in self.app_config.renamed_services:
+            old_name = item.get("old_name", "")
+            new_name = item.get("new_name", "")
+            if old_name and new_name:
+                self.logger.info(f"服务改名: {old_name} -> {new_name}")
+                self.task_mgr.update_service_name(old_name, new_name)
+
+    def _list_services(self):
+        """获取要迁移的服务列表"""
+        script_dir = self.app_config.script_directory_path
+        if not os.path.isdir(script_dir):
+            self.logger.warning(f"脚本目录不存在: {script_dir}")
+            return []
+
+        # 如果有 services 配置，按配置过滤；否则扫描目录
+        if self.app_config.services:
+            return list(self.app_config.services.keys())
+
+        return [d for d in os.listdir(script_dir)
+                if os.path.isdir(os.path.join(script_dir, d))]
+
+    def _migrate_service(self, service_name: str):
+        """迁移单个服务"""
+        self.logger.info(f"======= 开始迁移服务: {service_name} =======")
+
+        task_record = self.task_mgr.select_task(service_name)
+
+        if task_record:
+            # 升级路径
+            self._upgrade_service(service_name, task_record)
+        else:
+            # 首次安装路径
+            self._install_service(service_name)
+
+    def _install_service(self, service_name: str):
+        """首次安装：执行 init.sql + 后续增量"""
+        self.logger.info(f"[{service_name}] 首次安装")
+
+        # 查找 init.sql
+        init_path = self.script_selector.find_init_sql(service_name)
+        if not init_path:
+            self.logger.warning(f"[{service_name}] 未找到 init.sql，跳过")
+            return
+
+        # 执行 init.sql
+        sql_list = parse_sql_file(init_path, self.logger)
+        self._execute_sql_list_with_idempotency(sql_list)
+        self.logger.info(f"[{service_name}] init.sql 执行完成")
+
+        # 确定 init.sql 所在版本
+        parts = init_path.split(os.sep)
+        # 路径格式: .../service/db_type/version/init.sql
+        init_version = parts[-2]
+        max_version = self.script_selector.get_max_version(service_name) or init_version
+
+        # 注册任务
+        init_filename = os.path.basename(init_path)
+        self.task_mgr.insert_task(
+            service_name=service_name,
+            installed_version=init_version,
+            target_version=max_version,
+            script_file_name=init_filename,
+            status="success",
+        )
+
+        # 记录历史
+        self.history_mgr.record(
+            service_name=service_name,
+            version=init_version,
+            script_file_name=init_filename,
+            script_path=init_path,
+        )
+
+        # 执行 init_version 之后的增量脚本
+        upgrade_files, _, has_scripts = self.script_selector.select_upgrade_scripts(
+            service_name, init_version
+        )
+        if has_scripts:
+            self._execute_upgrade_files(service_name, upgrade_files, max_version, init_version)
+
+        # 最终状态
+        self.task_mgr.update_status(
+            service_name=service_name,
+            status="success",
+            installed_version=max_version,
+            target_version=max_version,
+        )
+        self.logger.info(f"[{service_name}] 安装完成, version={max_version}")
+
+    def _upgrade_service(self, service_name: str, task_record: dict):
+        """升级路径"""
+        installed_version = task_record["installed_version"]
+        self.logger.info(f"[{service_name}] 升级, installed_version={installed_version}")
+
+        upgrade_files, max_version, has_scripts = self.script_selector.select_upgrade_scripts(
+            service_name, installed_version
+        )
+
+        if not has_scripts:
+            self.logger.info(f"[{service_name}] 无需升级，已是最新版本")
+            return
+
+        # 更新状态为 running
+        self.task_mgr.update_status(
+            service_name=service_name,
+            status="running",
+            target_version=max_version,
+        )
+
+        self._execute_upgrade_files(service_name, upgrade_files, max_version, installed_version)
+
+        # 成功
+        self.task_mgr.update_status(
+            service_name=service_name,
+            status="success",
+            installed_version=max_version,
+            target_version=max_version,
+        )
+        self.logger.info(f"[{service_name}] 升级完成, version={max_version}")
+
+    def _execute_upgrade_files(self, service_name: str, upgrade_files_list: list,
+                               target_version: str, installed_version: str):
+        """执行升级文件列表"""
+        for version_scripts in upgrade_files_list:
+            for script_path in version_scripts:
+                script_name = os.path.basename(script_path)
+                # 从路径提取版本号
+                parts = script_path.split(os.sep)
+                version = parts[-2]
+                relative_name = f"{version}/{script_name}"
+
+                self.logger.info(f"[{service_name}] 执行: {relative_name}")
+
+                # 更新当前脚本到 task
+                self.task_mgr.update_status(
+                    service_name=service_name,
+                    status="running",
+                    script_file_name=relative_name,
+                    target_version=target_version,
+                )
+
+                try:
+                    self._run_script(script_path)
+                except Exception as ex:
+                    # 失败：记录状态并中断
+                    self.task_mgr.update_status(
+                        service_name=service_name,
+                        status="failed",
+                        script_file_name=relative_name,
+                    )
+                    self.history_mgr.record(
+                        service_name=service_name,
+                        version=version,
+                        script_file_name=relative_name,
+                        script_path=script_path,
+                        status="failed",
+                    )
+                    raise Exception(f"执行脚本失败: {relative_name}, error: {ex}")
+
+                # 成功：记录历史
+                self.history_mgr.record(
+                    service_name=service_name,
+                    version=version,
+                    script_file_name=relative_name,
+                    script_path=script_path,
+                )
+                self.logger.info(f"[{service_name}] 成功: {relative_name}")
+
+    def _run_script(self, script_path: str):
+        """执行单个脚本文件（.sql 或 .py）"""
+        _, ext = os.path.splitext(script_path)
+
+        if ext == ".sql":
+            sql_list = parse_sql_file(script_path, self.logger)
+            self._execute_sql_list_with_idempotency(sql_list)
+
+        elif ext == ".py":
+            custom_env = os.environ.copy()
+            custom_env["PYTHONUNBUFFERED"] = "1"
+            result = subprocess.run(
+                [sys.executable, script_path],
+                env=custom_env,
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8",
+            )
+            for line in result.stdout.splitlines():
+                self.logger.info(line.strip())
+            for line in result.stderr.splitlines():
+                self.logger.info(line.strip())
+
+        else:
+            self.logger.warning(f"不支持的脚本类型: {script_path}，跳过")
+
+    def _execute_sql_list_with_idempotency(self, sql_list: list):
+        """带幂等预检地执行 SQL 列表"""
+        for sql in sql_list:
+            if self.idempotency.should_skip(sql):
+                continue
+            self.operate_db.run_ddl([sql])
