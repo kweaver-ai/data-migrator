@@ -63,17 +63,17 @@ def main():
         from server.config.loader import load_config
         app_config = load_config(args.config, args.service, logger)
 
-        from server.collect.collector import run_collect
-        run_collect(app_config, logger)
+        from server.collect.collector import CollectExecutor
+        executor = CollectExecutor(app_config, logger)
+        executor.run()
 
     elif args.command == "check":
         from server.config.loader import load_config
         app_config = load_config(args.config, args.service, logger)
 
-        from server.check.repo_checker import run_check_repo
-        from server.check.schema_checker import run_check_schema
-        run_check_repo(app_config, logger)
-        run_check_schema(app_config, logger)
+        from server.check.executor import CheckExecutor
+        executor = CheckExecutor(app_config, logger)
+        executor.run()
 
 
 if __name__ == "__main__":
