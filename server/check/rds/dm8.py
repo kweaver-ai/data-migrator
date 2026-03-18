@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""DM8 校验实现"""
+"""DM8 校验实现 — 移植自 tools/rds/dm8.py"""
+from logging import Logger
+
 from server.check.rds.base import CheckRDS, load_rds_config
 from server.check.check_config import CheckConfig
+from server.utils.table_define import Database, Table, Index, PrimaryIndex, UniqueIndex, Column
+from server.utils.token import next_token, next_tokens
 
 
 class CheckDM8(CheckRDS):
-    def __init__(self, check_config: CheckConfig, is_primary: bool = True):
+    def __init__(self, check_config: CheckConfig, logger: Logger = None, is_primary: bool = True):
         self.DB_TYPE = "DM8"
 
         rds_cfg = load_rds_config()["dm8"]
@@ -18,16 +22,33 @@ class CheckDM8(CheckRDS):
         self.CREATE_DATABASE_SQL = "CREATE SCHEMA {db_name}"
         self.DROP_DATABASE_SQL = "DROP SCHEMA {db_name} CASCADE"
         self.QUERY_TABLES_SQL = "SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER='{db_name}'"
-        self.QUERY_COLUMNS_SQL = "SELECT * FROM ALL_TAB_COLUMNS WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}'"
+        self.QUERY_TABLE_SQL = "SELECT TABLE_NAME FROM ALL_TABLES WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}'"
+        self.RENAME_TABLE_SQL = "ALTER TABLE {db_name}.\"{table_name}\" RENAME TO {new_name}"
+        self.DROP_TABLE_SQL = "DROP TABLE IF EXISTS {db_name}.\"{table_name}\" CASCADE"
+
         self.COLUMN_NAME_FIELD = "COLUMN_NAME"
+        self.QUERY_COLUMNS_SQL = "SELECT * FROM ALL_TAB_COLUMNS WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}'"
+        self.QUERY_COLUMN_SQL = (
+            "SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}' AND COLUMN_NAME='{column_name}'"
+        )
+        self.ADD_COLUMN_SQL = "ALTER TABLE {db_name}.\"{table_name}\" ADD COLUMN IF NOT EXISTS {column_name} {column_property}"
+        self.MODIFY_COLUMN_SQL = "ALTER TABLE {db_name}.\"{table_name}\" MODIFY {column_name} {column_property}"
+        self.RENAME_COLUMN_SQL = "ALTER TABLE {db_name}.\"{table_name}\" RENAME COLUMN {column_name} TO {new_name}"
+        self.DROP_COLUMN_SQL = "ALTER TABLE {db_name}.\"{table_name}\" DROP COLUMN IF EXISTS {column_name}"
 
-        super().__init__(check_config)
+        self.QUERY_INDEX_SQL = "SELECT * FROM ALL_INDEXES WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}' AND index_name='{index_name}'"
+        self.ADD_INDEX_SQL = "CREATE {index_type} IF NOT EXISTS {index_name} ON {db_name}.\"{table_name}\" ({index_property})"
+        self.RENAME_INDEX_SQL = "ALTER INDEX {db_name}.{index_name} RENAME TO {new_name}"
+        self.DROP_INDEX_SQL = "DROP INDEX IF EXISTS {db_name}.{index_name}"
 
-    def check_init(self, sql_list: list):
-        pass
+        self.QUERY_CONSTRAINT_SQL = (
+            "SELECT * FROM ALL_CONSTRAINTS WHERE OWNER='{db_name}' AND TABLE_NAME='{table_name}' AND CONSTRAINT_NAME='{constraint_name}'"
+        )
+        self.ADD_CONSTRAINT_SQL = "ALTER TABLE {db_name}.\"{table_name}\" ADD CONSTRAINT {constraint_name} {constraint_property}"
+        self.RENAME_CONSTRAINT_SQL = "ALTER TABLE {db_name}.\"{table_name}\" RENAME CONSTRAINT {constraint_name} TO {new_name}"
+        self.DROP_CONSTRAINT_SQL = "ALTER TABLE {db_name}.\"{table_name}\" DROP CONSTRAINT {constraint_name} CASCADE"
 
-    def check_update(self, sql_list: list):
-        pass
+        super().__init__(check_config, logger)
 
     def get_column_type(self, column: dict) -> tuple:
         data_type = column["DATA_TYPE"].upper()
@@ -44,3 +65,405 @@ class CheckDM8(CheckRDS):
         elif data_type in ("DATE", "DATETIME", "TIMESTAMP", "TIME"):
             return data_type, "DateAndTimeType"
         return data_type, "UNKNOWN"
+
+    # ── check_init / check_update ──
+
+    def check_init(self, sql_list: list):
+        if len(sql_list) == 0:
+            return
+
+        sql = sql_list[0]
+        token, remaining_sql = next_token(sql)
+        token = token.upper()
+        if token != "SET":
+            raise Exception(f"init文件中第一条语句必须为 'SET SCHEMA': {sql}")
+
+        db = self.parse_sql_use_db(sql)
+        if db is None:
+            raise Exception(f"USE Database语法错误: {sql}")
+
+        sql_list = sql_list[1:]
+        for sql in sql_list:
+            token, remaining_sql = next_token(sql)
+            token = token.upper()
+            if token == "SET":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 == "SCHEMA":
+                    db = self.parse_sql_use_db(sql)
+                elif token2 == "IDENTITY_INSERT":
+                    continue
+                else:
+                    raise Exception(f"不合法的sql语句: {sql}")
+            elif token == "CREATE":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 == "TABLE":
+                    self.parse_sql_create_table(sql, db)
+                elif token2 == "UNIQUE":
+                    self.parse_sql_create_unique_index(sql, db)
+                elif token2 == "INDEX":
+                    self.parse_sql_create_index(sql, db)
+                else:
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
+            elif token == "INSERT":
+                continue
+            else:
+                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT': {sql}")
+
+    def check_update(self, sql_list: list):
+        if len(sql_list) == 0:
+            return
+
+        sql = sql_list[0]
+        token, remaining_sql = next_token(sql)
+        token = token.upper()
+        if token != "SET":
+            raise Exception(f"init文件中第一条语句必须为 'SET SCHEMA': {sql}")
+
+        db = self.parse_sql_use_db(sql)
+        if db is None:
+            raise Exception(f"USE Database语法错误: {sql}")
+
+        sql_list = sql_list[1:]
+        for sql in sql_list:
+            token, remaining_sql = next_token(sql)
+            token = token.upper()
+            if token == "SET":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 == "SCHEMA":
+                    db = self.parse_sql_use_db(sql)
+                elif token2 == "IDENTITY_INSERT":
+                    continue
+                else:
+                    raise Exception(f"不合法的sql语句: {sql}")
+            elif token == "CREATE":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 == "TABLE":
+                    self.parse_sql_create_table(sql, db)
+                elif token2 == "UNIQUE":
+                    self.parse_sql_create_unique_index(sql, db)
+                elif token2 == "INDEX":
+                    self.parse_sql_create_index(sql, db)
+                else:
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
+            elif token == "INSERT":
+                continue
+            elif token == "DELETE":
+                continue
+            elif token == "DROP":
+                continue
+            elif token == "UPDATE":
+                continue
+            else:
+                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT', 'UPDATE': {sql}")
+
+    # ── SQL 解析 ──
+
+    def parse_sql_use_db(self, sql: str):
+        remaining_sql = sql
+        tokens, remaining_sql = next_tokens(remaining_sql, 3)
+        if len(tokens) != 3 or tokens[0].upper() != "SET" or tokens[1].upper() != "SCHEMA":
+            raise Exception(f"不合法的 SET SCHEMA 语句: {sql}")
+
+        db_name = tokens[2]
+        db_name = self.get_real_name(db_name)
+        db = Database(db_name)
+        return db
+
+    def parse_sql_create_table(self, sql: str, db: Database):
+        remaining_sql = sql
+        tokens, remaining_sql = next_tokens(remaining_sql, 5)
+        if (
+            len(tokens) != 5
+            or tokens[0].upper() != "CREATE"
+            or tokens[1].upper() != "TABLE"
+            or tokens[2].upper() != "IF"
+            or tokens[3].upper() != "NOT"
+            or tokens[4].upper() != "EXISTS"
+        ):
+            raise Exception(f"建表语句需要以 'CREATE TABLE IF NOT EXISTS' 开头: {sql}")
+
+        l_idx = remaining_sql.find("(")
+        if l_idx == -1:
+            raise Exception(f"不合法的建表语句, 缺少 '(': {sql}")
+        table_name = remaining_sql[:l_idx]
+        table_name = self.get_real_name(table_name)
+        table = Table(table_name, self.logger)
+
+        r_idx = remaining_sql.rfind(")")
+        if r_idx == -1:
+            raise Exception(f"不合法的建表语句, 缺少 ')': {sql}")
+        columns_define_sql = remaining_sql[l_idx + 1 : r_idx]
+        table_define_sql = remaining_sql[r_idx + 1 :].strip(" ;")
+
+        self.parse_sql_table_options(table_define_sql, table)
+
+        columns_sqls = [line.strip(" ,\t") for line in columns_define_sql.splitlines() if line.strip(" ,\t")]
+        for column_sql in columns_sqls:
+            self.parse_sql_table_struct(column_sql, table)
+
+        self.check_table(table)
+        db.add_table(table)
+
+    def parse_sql_table_options(self, sql: str, table: Table):
+        if not sql:
+            return
+        remaining_sql = sql
+        while remaining_sql != "":
+            key, remaining_sql = next_token(remaining_sql)
+            key = key.upper()
+            if key != "":
+                raise Exception(f"表定义中包含不合法的关键字 '{key}': {sql}")
+
+    def get_real_name(self, name: str):
+        real_name = name.strip(' "\n;')
+        chars_to_check = {".", "`", "'"}
+        if chars_to_check & set(real_name):
+            raise Exception(f"名称中包含不合法字符 ('.', '\"', ''')': {name}")
+        return real_name
+
+    def get_real_column_name(self, name: str):
+        real_name = name
+        idx = real_name.find("(")
+        if idx != -1:
+            real_name = real_name[:idx]
+
+        real_name = real_name.strip(' "\n')
+        chars_to_check = {".", "`", "'"}
+        if chars_to_check & set(real_name):
+            raise Exception(f"名称中包含不合法字符 ('.', '`', ''')': {name}")
+        return real_name
+
+    def parse_sql_table_struct(self, column_sql: str, table: Table):
+        remaining_sql = column_sql
+        first_token, remaining_sql = next_token(remaining_sql)
+        if first_token == "CLUSTER":
+            tokens, remaining_sql = next_tokens(remaining_sql, 2)
+            if tokens[0] != "PRIMARY" or tokens[1] != "KEY":
+                raise Exception(f"主键索引语法错误 :{column_sql}")
+            if remaining_sql[0] != "(":
+                raise Exception(f"主键索引语法错误 :{column_sql}")
+            ridx = remaining_sql.rfind(")")
+            if ridx == -1:
+                raise Exception(f"主键索引语法错误 :{column_sql}")
+            columns_str = remaining_sql[1:ridx]
+            columns = [line.strip() for line in columns_str.split(",") if line.strip()]
+            index = PrimaryIndex(table.TableName)
+            for column in columns:
+                column_name = self.get_real_column_name(column)
+                index.add_column(column_name)
+            table.set_primary_index(index)
+        elif first_token == "CONSTRAINT":
+            tokens, remaining_sql = next_tokens(remaining_sql, 3)
+            if tokens[1] != "FOREIGN" or tokens[2] != "KEY":
+                raise Exception(f"约束语法错误 :{column_sql}")
+            table.add_foreign_key(column_sql)
+        elif first_token == "FOREIGN":
+            token, remaining_sql = next_token(remaining_sql)
+            if token != "KEY":
+                raise Exception(f"外键约束语法错误 :{column_sql}")
+            table.add_foreign_key(column_sql)
+        else:
+            column_name = first_token
+            column = self.parse_sql_column_define(column_name, remaining_sql)
+            table.add_column(column)
+
+    def parse_sql_column_define(self, column_name: str, column_sql: str):
+        remaining_sql = column_sql
+        column_name = self.get_real_column_name(column_name)
+        column_type, remaining_sql = next_token(remaining_sql)
+        column = Column(column_name, column_type)
+
+        column.ColumnLen, remaining_sql = self.parse_sql_column_len(remaining_sql)
+
+        while remaining_sql != "":
+            key, remaining_sql = next_token(remaining_sql)
+            key = key.upper()
+            if key == "IDENTITY":
+                if not remaining_sql.startswith("("):
+                    raise Exception(f"IDENTITY 语法错误 :{column_sql}")
+                idx = remaining_sql.find(")")
+                if idx == -1:
+                    raise Exception(f"不合法的建表语句, 缺少 ')': {column_sql}")
+
+                identify_define = remaining_sql[1:idx]
+                remaining_sql = remaining_sql[idx + 1 :].strip(" ")
+
+                identify_tokens = [line.strip() for line in identify_define.split(",") if line.strip()]
+                if len(identify_tokens) != 2 or not identify_tokens[0].isdigit() or not identify_tokens[1].isdigit():
+                    raise Exception(f"IDENTITY 语法错误 :{column_sql}")
+                column.ColumnIdentity = f"{key}({identify_tokens[0]}, {identify_tokens[1]})"
+            elif key == "COMMENT":
+                column.ColumnComment, remaining_sql = next_token(remaining_sql)
+            elif key == "NULL":
+                column.ColumnNull = True
+            elif key == "NOT":
+                key2, remaining_sql = next_token(remaining_sql)
+                if key2.upper() == "NULL":
+                    column.ColumnNull = False
+                else:
+                    raise Exception(f"NOT NULL 语法错误 :{column_sql}")
+            elif key == "DEFAULT":
+                default_value, remaining_sql = next_token(remaining_sql)
+                if remaining_sql.startswith("("):
+                    stack = []
+                    end_idx = 0
+                    for i, char in enumerate(remaining_sql):
+                        if char == "(":
+                            stack.append(char)
+                        elif char == ")":
+                            stack.pop()
+                            if not stack:
+                                end_idx = i
+                                break
+                    else:
+                        raise Exception(f"不合法的建表语句, 缺少 ')': {column_sql}")
+
+                    default_value += remaining_sql[: end_idx + 1]
+                    remaining_sql = remaining_sql[end_idx + 1 :].strip(" ")
+                column.ColumnDefault = default_value
+            else:
+                raise Exception(f"列定义中包含不合法的关键字 '{key}': {column_sql}")
+
+        return column
+
+    def parse_sql_column_len(self, column_sql: str):
+        if column_sql.startswith("("):
+            idx = column_sql.find(")")
+            if idx != -1:
+                remaining_sql = column_sql[idx + 1 :].strip(" ")
+                column_len = column_sql[1:idx].strip(" ")
+                return column_len, remaining_sql
+        return None, column_sql
+
+    def parse_sql_create_unique_index(self, sql: str, db: Database):
+        remaining_sql = sql
+        tokens, remaining_sql = next_tokens(remaining_sql, 6)
+        if (
+            len(tokens) != 6
+            or tokens[0].upper() != "CREATE"
+            or tokens[1].upper() != "UNIQUE"
+            or tokens[2].upper() != "INDEX"
+            or tokens[3].upper() != "IF"
+            or tokens[4].upper() != "NOT"
+            or tokens[5].upper() != "EXISTS"
+        ):
+            raise Exception(f"唯一索引语法错误 :{sql}")
+
+        index_name, remaining_sql = next_token(remaining_sql)
+        index_name = self.get_real_name(index_name)
+
+        token, remaining_sql = next_token(remaining_sql)
+        if token != "ON":
+            raise Exception(f"唯一索引语法错误 :{sql}")
+
+        table_name, remaining_sql = next_token(remaining_sql)
+        table_name = self.get_real_name(table_name)
+        table = db.get_table(table_name)
+        if not table:
+            raise Exception(f"表不存在 :{table_name}")
+
+        if remaining_sql[0] != "(":
+            raise Exception(f"唯一索引语法错误 :{sql}")
+        ridx = remaining_sql.rfind(")")
+        if ridx == -1:
+            raise Exception(f"唯一索引语法错误 :{sql}")
+        columns_str = remaining_sql[1:ridx]
+        columns = [line.strip() for line in columns_str.split(",") if line.strip()]
+        index = UniqueIndex(table.TableName, index_name, self.logger)
+        for column in columns:
+            column_name = self.get_real_column_name(column)
+            index.add_column(column_name)
+        table.add_index(index)
+
+    def parse_sql_create_index(self, sql: str, db: Database):
+        remaining_sql = sql
+        tokens, remaining_sql = next_tokens(remaining_sql, 5)
+        if (
+            len(tokens) != 5
+            or tokens[0].upper() != "CREATE"
+            or tokens[1].upper() != "INDEX"
+            or tokens[2].upper() != "IF"
+            or tokens[3].upper() != "NOT"
+            or tokens[4].upper() != "EXISTS"
+        ):
+            raise Exception(f"普通索引语法错误 :{sql}")
+
+        index_name, remaining_sql = next_token(remaining_sql)
+        index_name = self.get_real_name(index_name)
+
+        token, remaining_sql = next_token(remaining_sql)
+        if token != "ON":
+            raise Exception(f"普通索引语法错误 :{sql}")
+
+        table_name, remaining_sql = next_token(remaining_sql)
+        table_name = self.get_real_name(table_name)
+        table = db.get_table(table_name)
+        if not table:
+            raise Exception(f"表不存在 :{table_name}")
+
+        if remaining_sql[0] != "(":
+            raise Exception(f"普通索引语法错误 :{sql}")
+        ridx = remaining_sql.rfind(")")
+        if ridx == -1:
+            raise Exception(f"普通索引语法错误 :{sql}")
+        columns_str = remaining_sql[1:ridx]
+        columns = [line.strip() for line in columns_str.split(",") if line.strip()]
+        index = Index(table.TableName, index_name, self.logger)
+        for column in columns:
+            column_name = self.get_real_column_name(column)
+            index.add_column(column_name)
+        table.add_index(index)
+
+    def check_table(self, table: Table):
+        if table.PrimaryIndex is None:
+            if self.check_config.AllowNonePrimaryKey:
+                if self.logger:
+                    self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
+            else:
+                raise Exception(f"表 '{table.TableName}' 中缺少主键索引")
+        else:
+            column_names = table.PrimaryIndex.Columns
+            for column_name in column_names:
+                if column_name not in table.Columns:
+                    raise Exception(f"表 '{table.TableName}' 中不存在主键索引中的字段 '{column_name}'")
+
+        for index_name in table.Indices:
+            index = table.Indices[index_name]
+            column_names = index.Columns
+            for column_name in column_names:
+                if column_name not in table.Columns:
+                    raise Exception(f"表 '{table.TableName}' 中不存在索引 '{index_name}' 中的字段 '{column_name}'")
+                else:
+                    column = table.Columns[column_name]
+                    if column.ColumnType == "TEXT":
+                        raise Exception(
+                            f"表 '{table.TableName}' 中索引 '{index_name}' 中的字段 '{column_name}' 是文本类型字段, 不支持使用该类型，建议使用 VARCHAR 类型"
+                        )
+
+        for column_name in table.Columns:
+            column = table.Columns[column_name]
+            self.check_column(table.TableName, column)
+
+        if len(table.ForeignKeys) > 0:
+            if self.check_config.AllowForeignKey:
+                if self.logger:
+                    self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
+            else:
+                raise Exception(f"表 '{table.TableName}' 中存在外键约束, 但配置中不允许外键约束")
+
+    def check_column(self, table_name: str, column: Column):
+        if column.ColumnType in ("TEXT", "MEDIUMTEXT", "LONGTEXT", "BLOB", "JSON"):
+            if column.ColumnDefault is not None and column.ColumnDefault.upper() != "NULL":
+                raise Exception(f"表 '{table_name}' 中字段 '{column.ColumnName}' 是文本类型字段, 不支持设置默认值")
+        elif column.ColumnType == "CHAR":
+            raise Exception(f"表 '{table_name}' 中字段 '{column.ColumnName}' 是 CHAR 类型, 不支持使用该类型，建议使用 VARCHAR 类型")
+        elif column.ColumnType == "VARCHAR":
+            if not column.ColumnLen.upper().endswith(" CHAR"):
+                raise Exception(f"表 '{table_name}' 中字段 '{column.ColumnName}' 是 VARCHAR 类型, 格式必须为 'VARCHAR(n CHAR)'")
+        elif column.ColumnType in ("INT", "INTEGER", "TINYINT", "SMALLINT", "BIGINT"):
+            if column.ColumnLen is not None:
+                raise Exception(f"表 '{table_name}' 中字段 '{column.ColumnName}' 是 数值类型, 长度必须为空")

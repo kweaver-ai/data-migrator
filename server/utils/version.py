@@ -16,48 +16,24 @@ def is_version_dir(version_str: str) -> bool:
 
 def compare_version(v1: str, v2: str) -> int:
     """
-    比较两个版本号，返回 -1/0/1。
-    支持格式: 1.0.0, 1.4.20.1, m5.5, m5-6
+    比较两个标准语义化版本号，返回 -1/0/1。
+    仅支持全数字格式: 1.0.0, 1.4.20.1
     """
-    # m5.5 格式
-    match1 = re.match(r"m(\d+)\.(\d+)", v1)
-    match2 = re.match(r"m(\d+)\.(\d+)", v2)
-    if match1 and match2:
-        major1, minor1 = int(match1.group(1)), float(match1.group(2))
-        major2, minor2 = int(match2.group(1)), float(match2.group(2))
-        if major1 != major2:
-            return -1 if major1 < major2 else 1
-        if minor1 != minor2:
-            return -1 if minor1 < minor2 else 1
-        return 0
-
-    # m5-6 格式
-    match1 = re.match(r"m(\d+)-(\d+)", v1)
-    match2 = re.match(r"m(\d+)-(\d+)", v2)
-    if match1 and match2:
-        major1, minor1 = int(match1.group(1)), int(match1.group(2))
-        major2, minor2 = int(match2.group(1)), int(match2.group(2))
-        if major1 != major2:
-            return -1 if major1 < major2 else 1
-        if minor1 != minor2:
-            return -1 if minor1 < minor2 else 1
-        return 0
-
-    # 标准语义化版本: 1.0.0, 1.4.20.1
     try:
         arr1 = [int(n) for n in v1.split(".")]
         arr2 = [int(n) for n in v2.split(".")]
-        max_len = max(len(arr1), len(arr2))
-        arr1 += [0] * (max_len - len(arr1))
-        arr2 += [0] * (max_len - len(arr2))
-        for a, b in zip(arr1, arr2):
-            if a > b:
-                return 1
-            elif a < b:
-                return -1
-        return 0
-    except Exception as ex:
-        raise Exception(f"Unable to parse version number, details: {ex}")
+    except ValueError as ex:
+        raise Exception(f"版本号必须为全数字的语义化版本 (如 1.0.0), 解析失败: v1={v1}, v2={v2}, 详情: {ex}")
+
+    max_len = max(len(arr1), len(arr2))
+    arr1 += [0] * (max_len - len(arr1))
+    arr2 += [0] * (max_len - len(arr2))
+    for a, b in zip(arr1, arr2):
+        if a > b:
+            return 1
+        elif a < b:
+            return -1
+    return 0
 
 
 def get_max_version(versions: List[str]) -> Optional[str]:

@@ -147,7 +147,7 @@ class SchemaChecker:
                 continue
 
             if filename.endswith(".json"):
-                self.logger.warning(f"跳过 .json 文件: {filepath}")
+                self._check_json_file(filepath, check_rds)
                 continue
 
             if filename.endswith(".sql"):
@@ -164,6 +164,91 @@ class SchemaChecker:
         sql_list = [sql for sql in sql_list if sql.strip() and sql.strip() != ";"]
         if sql_list:
             check_rds.run_sql(sql_list)
+
+    def _check_json_file(self, filepath: str, check_rds: CheckRDS):
+        """执行 JSON 升级文件 — 按操作类型调用 CheckRDS 方法"""
+        self.logger.info(f"执行 JSON 文件: {filepath}")
+        with open(filepath, "r", encoding="utf-8") as f:
+            try:
+                update_items = json.load(f)
+            except json.JSONDecodeError as e:
+                raise Exception(f"无效的JSON文件: {filepath}, {e}")
+            if not isinstance(update_items, list):
+                raise Exception(f"JSON根类型必须为对象(list): {filepath}")
+
+        if len(update_items) <= 0:
+            raise Exception(f"JSON列表不能为空: {filepath}")
+
+        required_fields = ["db_name", "table_name", "object_type", "operation_type",
+                           "object_name", "object_property", "object_comment"]
+        allowed_object_types = {"COLUMN", "INDEX", "UNIQUE INDEX", "CONSTRAINT", "TABLE", "DB"}
+        allowed_operation_types = {"ADD", "DROP", "MODIFY", "RENAME"}
+
+        for item in update_items:
+            if not isinstance(item, dict):
+                raise Exception(f"格式错误: {item}")
+
+            for field in required_fields:
+                if field not in item:
+                    raise Exception(f"缺少必填字段 '{field}': {item}")
+                if not isinstance(item[field], str):
+                    raise Exception(f"字段 '{field}' 必须为字符串: {item}")
+
+            db_name = item["db_name"]
+            table_name = item["table_name"]
+            object_type = item["object_type"]
+            operation_type = item["operation_type"]
+            object_name = item.get("object_name", "")
+            new_name = item.get("new_name", "")
+            object_property = item.get("object_property", "")
+            object_comment = item.get("object_comment", "")
+
+            if object_type not in allowed_object_types:
+                raise Exception(f"不支持的 object_type '{object_type}': {item}")
+            if operation_type not in allowed_operation_types:
+                raise Exception(f"不支持的 operation_type '{operation_type}': {item}")
+
+            if object_type == "COLUMN":
+                if operation_type == "ADD":
+                    check_rds.add_column(db_name, table_name, object_name, object_property, object_comment)
+                elif operation_type == "MODIFY":
+                    check_rds.modify_column(db_name, table_name, object_name, object_property, object_comment)
+                elif operation_type == "RENAME":
+                    check_rds.rename_column(db_name, table_name, object_name, new_name, object_property, object_comment)
+                elif operation_type == "DROP":
+                    check_rds.drop_column(db_name, table_name, object_name)
+                else:
+                    raise Exception(f"不支持的 operation_type '{operation_type}' for object_type '{object_type}': {item}")
+            elif object_type in ("INDEX", "UNIQUE INDEX"):
+                if operation_type == "ADD":
+                    check_rds.add_index(db_name, table_name, object_type, object_name, object_property, object_comment)
+                elif operation_type == "RENAME":
+                    check_rds.rename_index(db_name, table_name, object_name, new_name)
+                elif operation_type == "DROP":
+                    check_rds.drop_index(db_name, table_name, object_name)
+                else:
+                    raise Exception(f"不支持的 operation_type '{operation_type}' for object_type '{object_type}': {item}")
+            elif object_type == "CONSTRAINT":
+                if operation_type == "ADD":
+                    check_rds.add_constraint(db_name, table_name, object_name, object_property)
+                elif operation_type == "RENAME":
+                    check_rds.rename_constraint(db_name, table_name, object_name, new_name)
+                elif operation_type == "DROP":
+                    check_rds.drop_constraint(db_name, table_name, object_name)
+                else:
+                    raise Exception(f"不支持的 operation_type '{operation_type}' for object_type '{object_type}': {item}")
+            elif object_type == "TABLE":
+                if operation_type == "RENAME":
+                    check_rds.rename_table(db_name, table_name, new_name)
+                elif operation_type == "DROP":
+                    check_rds.drop_table(db_name, table_name)
+                else:
+                    raise Exception(f"不支持的 operation_type '{operation_type}' for object_type '{object_type}': {item}")
+            elif object_type == "DB":
+                if operation_type == "DROP":
+                    check_rds.drop_db(db_name)
+                else:
+                    raise Exception(f"不支持的 operation_type '{operation_type}' for object_type '{object_type}': {item}")
 
     def _check_py_file(self, filepath: str, check_rds: CheckRDS):
         self.logger.info(f"执行 Python 文件: {filepath}")
