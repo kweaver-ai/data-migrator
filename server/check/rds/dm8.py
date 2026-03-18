@@ -104,6 +104,14 @@ class CheckDM8(CheckRDS):
                     self.parse_sql_create_unique_index(sql, db)
                 elif token2 == "INDEX":
                     self.parse_sql_create_index(sql, db)
+                elif token2 == "VIEW":
+                    continue
+                elif token2 == "OR":
+                    tokens, remaining_sql = next_tokens(remaining_sql, 2)
+                    tokens = [t.upper() for t in tokens]
+                    if tokens != ["REPLACE", "VIEW"]:
+                        raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
+                    continue
                 else:
                     raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
             elif token == "INSERT":
@@ -147,6 +155,14 @@ class CheckDM8(CheckRDS):
                     self.parse_sql_create_unique_index(sql, db)
                 elif token2 == "INDEX":
                     self.parse_sql_create_index(sql, db)
+                elif token2 == "VIEW":
+                    continue
+                elif token2 == "OR":
+                    tokens, remaining_sql = next_tokens(remaining_sql, 2)
+                    tokens = [t.upper() for t in tokens]
+                    if tokens != ["REPLACE", "VIEW"]:
+                        raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
+                    continue
                 else:
                     raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
             elif token == "INSERT":
@@ -154,11 +170,21 @@ class CheckDM8(CheckRDS):
             elif token == "DELETE":
                 continue
             elif token == "DROP":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 not in ("INDEX", "TABLE", "VIEW"):
+                    raise Exception(f"不合法的sql语句, 仅支持 'DROP INDEX', 'DROP TABLE', 'DROP VIEW': {sql}")
+                continue
+            elif token == "ALTER":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 != "TABLE":
+                    raise Exception(f"不合法的sql语句, 仅支持 'ALTER TABLE': {sql}")
                 continue
             elif token == "UPDATE":
                 continue
             else:
-                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT', 'UPDATE': {sql}")
+                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT', 'UPDATE', 'ALTER TABLE', 'DROP INDEX', 'DROP TABLE', 'DROP VIEW': {sql}")
 
     # ── SQL 解析 ──
 

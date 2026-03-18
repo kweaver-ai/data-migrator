@@ -91,6 +91,14 @@ class CheckMariaDB(CheckRDS):
                 token2 = token2.upper()
                 if token2 == "TABLE":
                     self.parse_sql_create_table(sql, db)
+                elif token2 == "VIEW":
+                    continue
+                elif token2 == "OR":
+                    tokens, remaining_sql = next_tokens(remaining_sql, 2)
+                    tokens = [t.upper() for t in tokens]
+                    if tokens != ["REPLACE", "VIEW"]:
+                        raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
+                    continue
                 else:
                     raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
             elif token == "INSERT":
@@ -123,14 +131,40 @@ class CheckMariaDB(CheckRDS):
                 token2 = token2.upper()
                 if token2 == "TABLE":
                     self.parse_sql_create_table(sql, db)
+                elif token2 == "VIEW":
+                    continue
+                elif token2 == "OR":
+                    tokens, remaining_sql = next_tokens(remaining_sql, 2)
+                    tokens = [t.upper() for t in tokens]
+                    if tokens != ["REPLACE", "VIEW"]:
+                        raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
+                    continue
                 else:
                     raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
             elif token == "INSERT":
                 continue
             elif token == "UPDATE":
                 continue
+            elif token == "ALTER":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 != "TABLE":
+                    raise Exception(f"不合法的sql语句, 仅支持 'ALTER TABLE': {sql}")
+                continue
+            elif token == "DROP":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 not in ("INDEX", "TABLE", "VIEW"):
+                    raise Exception(f"不合法的sql语句, 仅支持 'DROP INDEX', 'DROP TABLE', 'DROP VIEW': {sql}")
+                continue
+            elif token == "RENAME":
+                token2, remaining_sql = next_token(remaining_sql)
+                token2 = token2.upper()
+                if token2 != "TABLE":
+                    raise Exception(f"不合法的sql语句, 仅支持 'RENAME TABLE': {sql}")
+                continue
             else:
-                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT', 'UPDATE': {sql}")
+                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT', 'UPDATE', 'ALTER TABLE', 'DROP INDEX', 'DROP TABLE', 'DROP VIEW', 'RENAME TABLE': {sql}")
 
     # ── SQL 解析 ──
 
