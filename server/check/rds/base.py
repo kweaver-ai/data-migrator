@@ -7,7 +7,11 @@ from logging import Logger
 from pathlib import Path
 
 import yaml
-import rdsdriver
+
+try:
+    import rdsdriver
+except ImportError:
+    rdsdriver = None
 
 from server.check.check_config import CheckConfig
 

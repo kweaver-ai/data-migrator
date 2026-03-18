@@ -4,19 +4,21 @@
 
 新目录结构：脚本直接放在 <version>/ 下，无子目录。
 """
+from __future__ import annotations
+
 import json
 import os
 from logging import Logger
+from typing import TYPE_CHECKING
 
 import sqlparse
 
 from server.config.models import AppConfig
 from server.check.check_config import CheckConfig
-from server.check.rds.base import CheckRDS
-from server.check.rds.mariadb import CheckMariaDB
-from server.check.rds.dm8 import CheckDM8
-from server.check.rds.kdb9 import CheckKDB9
 from server.utils.version import VersionUtil
+
+if TYPE_CHECKING:
+    from server.check.rds.base import CheckRDS
 
 
 class RepoChecker:
@@ -42,17 +44,25 @@ class RepoChecker:
 
         self.logger.info("代码库目录检查成功")
 
+    def _create_check_rds(self, db_type: str):
+        """延迟导入 RDS 实现，避免在无 rdsdriver 环境下 import 失败"""
+        from server.check.rds.mariadb import CheckMariaDB
+        from server.check.rds.dm8 import CheckDM8
+        from server.check.rds.kdb9 import CheckKDB9
+
+        if db_type == "mariadb":
+            return CheckMariaDB(self.check_config, self.logger)
+        elif db_type == "dm8":
+            return CheckDM8(self.check_config, self.logger)
+        elif db_type == "kdb9":
+            return CheckKDB9(self.check_config, self.logger)
+        else:
+            raise Exception(f"不支持的数据库类型: {db_type}")
+
     def _check_repo(self, repo_path: str, check_from: str) -> bool:
         self.logger.info(f"repo目录: {repo_path}")
         for db_type in self.check_config.DBTypes:
-            if db_type == "mariadb":
-                check_rds = CheckMariaDB(self.check_config, self.logger)
-            elif db_type == "dm8":
-                check_rds = CheckDM8(self.check_config, self.logger)
-            elif db_type == "kdb9":
-                check_rds = CheckKDB9(self.check_config, self.logger)
-            else:
-                raise Exception(f"不支持的数据库类型: {db_type}")
+            check_rds = self._create_check_rds(db_type)
 
             repo_db_path = os.path.join(repo_path, db_type)
             try:

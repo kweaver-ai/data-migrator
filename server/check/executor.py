@@ -4,18 +4,21 @@
 from logging import Logger
 
 from server.config.models import AppConfig
-from server.check.repo_checker import RepoChecker
-from server.check.schema_checker import SchemaChecker
 
 
 class CheckExecutor:
     def __init__(self, app_config: AppConfig, logger: Logger):
         self.app_config = app_config
         self.logger = logger
-        self.repo_checker = RepoChecker(app_config, logger)
-        self.schema_checker = SchemaChecker(app_config, logger)
 
     def run(self):
         """校验主入口：目录结构校验 + SQL 执行校验"""
-        self.repo_checker.run()
-        self.schema_checker.run()
+        
+        from server.check.repo_checker import RepoChecker
+        repo_checker = RepoChecker(self.app_config, self.logger)
+        repo_checker.run()
+
+        # schema_checker 依赖 rdsdriver 数据库连接，延迟导入
+        from server.check.schema_checker import SchemaChecker
+        schema_checker = SchemaChecker(self.app_config, self.logger)
+        schema_checker.run()

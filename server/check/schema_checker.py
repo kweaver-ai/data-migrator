@@ -87,7 +87,7 @@ class SchemaChecker:
 
     def _check_db_type(self, repo_db_path: str, primary: CheckRDS,
                        secondary: CheckRDS, check_from: str):
-        """新结构：脚本在 <version>/ 下，无 pre/post"""
+        """新结构：脚本在 <version>/ 下"""
         version_list = os.listdir(repo_db_path)
         versions = []
         for v in version_list:
