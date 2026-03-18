@@ -354,6 +354,7 @@ class CheckRDS(ABC):
 
     def list_tables_by_db(self, db_name: str) -> list:
         """获取数据库所有表名"""
+        os.environ["DB_TYPE"] = self.DB_TYPE
         try:
             with rdsdriver.connect(**self.DB_CONFIG_ROOT) as conn:
                 with conn.cursor() as cursor:
@@ -366,16 +367,19 @@ class CheckRDS(ABC):
 
     def get_table_columns(self, db_name: str, table_name: str) -> dict:
         """获取表结构"""
+        os.environ["DB_TYPE"] = self.DB_TYPE
         try:
-            with rdsdriver.connect(**self.DB_CONFIG_ROOT, cursorclass=rdsdriver.DictCursor) as conn:
+            with rdsdriver.connect(**self.DB_CONFIG_ROOT) as conn:
                 with conn.cursor() as cursor:
                     sql = self.QUERY_COLUMNS_SQL.format(db_name=db_name, table_name=table_name)
                     cursor.execute(sql)
+                    columns = [desc[0] for desc in cursor.description]
                     rowlist = cursor.fetchall()
                     schema = {}
                     for row in rowlist:
-                        col_name = row[self.COLUMN_NAME_FIELD].upper()
-                        schema[col_name] = row
+                        row_dict = dict(zip(columns, row))
+                        col_name = row_dict[self.COLUMN_NAME_FIELD].upper()
+                        schema[col_name] = row_dict
                     return schema
         except Exception as e:
             raise Exception(f"get_table_columns: {db_name}.{table_name} 失败, 错误: {e}")
