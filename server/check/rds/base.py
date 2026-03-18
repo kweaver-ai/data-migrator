@@ -14,6 +14,7 @@ except ImportError:
     rdsdriver = None
 
 from server.check.check_config import CheckConfig
+from server.utils.token import next_token, next_tokens
 
 # 默认配置文件路径（可通过环境变量 CHECK_RDS_CONFIG 覆盖）
 _DEFAULT_CONFIG_PATH = Path(__file__).parent / "check_rds_config.yaml"
@@ -53,6 +54,16 @@ class CheckRDS(ABC):
     @abstractmethod
     def check_column(self, table_name: str, column):
         """检查字段定义是否合法"""
+        pass
+
+    @abstractmethod
+    def parse_sql_use_db(self, sql: str):
+        """解析 USE / SET SCHEMA 等切库语句，返回 Database 对象"""
+        pass
+
+    @abstractmethod
+    def get_real_name(self, name: str):
+        """去除名称中的引号和空白字符"""
         pass
 
     # ── 数据库操作方法（供 schema_checker JSON 执行使用）──
@@ -341,16 +352,175 @@ class CheckRDS(ABC):
         except Exception as e:
             raise Exception(f"reset_schema: {db_names} 失败, 错误: {e}") from e
 
+    def _check_exists(self, cursor, query: str) -> bool:
+        """执行查询并返回是否有结果"""
+        cursor.execute(query)
+        return len(cursor.fetchall()) > 0
+
+    def _parse_object_name(self, qualified_name: str) -> str:
+        """从可能带数据库/schema前缀的名称中提取对象名（去除引号和空白）"""
+        if "." in qualified_name:
+            parts = qualified_name.split(".")
+            return self.get_real_name(parts[-1])
+        return self.get_real_name(qualified_name)
+
     def run_sql(self, sql_list: list):
-        """执行 SQL 语句列表"""
+        """执行 SQL 语句列表（幂等）：CREATE/DROP 语句先查对象是否存在再决定是否执行"""
         os.environ["DB_TYPE"] = self.DB_TYPE
         try:
             with rdsdriver.connect(**self.DB_CONFIG_ROOT) as conn:
                 with conn.cursor() as cursor:
+                    current_db = None
+                    # 获取切库语句的首个关键字（USE / SET）用于跟踪 current_db
+                    set_db_keyword = next_token(self.SET_DATABASE_SQL)[0].upper()
                     for sql in sql_list:
-                        cursor.execute(sql)
+                        token, remaining = next_token(sql)
+                        token = token.upper()
+
+                        if token == set_db_keyword:
+                            db = self.parse_sql_use_db(sql)
+                            current_db = db.DBName
+                            cursor.execute(sql)
+                        elif token == "CREATE":
+                            self._run_sql_create(cursor, current_db, sql, remaining)
+                        elif token == "DROP":
+                            self._run_sql_drop(cursor, current_db, sql, remaining)
+                        elif token == "ALTER":
+                            self._run_sql_alter(cursor, current_db, sql, remaining)
+                        elif token == "RENAME":
+                            self._run_sql_rename(cursor, current_db, sql, remaining)
+                        else:
+                            # INSERT, UPDATE, DELETE 等直接执行
+                            cursor.execute(sql)
         except Exception as e:
             raise Exception(f"run_sql 失败, DB_TYPE: {self.DB_TYPE}, 错误: {e}") from e
+
+    def _run_sql_create(self, cursor, current_db, sql, remaining):
+        """处理 CREATE 语句的幂等执行"""
+        token2, remaining2 = next_token(remaining)
+        token2 = token2.upper()
+
+        if token2 == "TABLE":
+            # CREATE TABLE [IF NOT EXISTS] <name>
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_tokens(remaining3, 2)  # skip NOT EXISTS
+                token3, _ = next_token(remaining3)
+            idx = token3.find("(")
+            name_raw = token3[:idx] if idx != -1 else token3
+            name = self.get_real_name(name_raw)
+            check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] table {name} 已存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "VIEW":
+            # CREATE VIEW [IF NOT EXISTS] <name>
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_tokens(remaining3, 2)  # skip NOT EXISTS
+                token3, _ = next_token(remaining3)
+            idx = token3.find("(")
+            name_raw = token3[:idx] if idx != -1 else token3
+            name = self.get_real_name(name_raw)
+            check_sql = self.QUERY_VIEW_SQL.format(db_name=current_db, view_name=name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] view {name} 已存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "OR":
+            # CREATE OR REPLACE VIEW — 天然幂等，直接执行
+            cursor.execute(sql)
+
+        elif token2 == "INDEX":
+            # CREATE INDEX [IF NOT EXISTS] <name> ON <tbl>(...)
+            self._run_sql_create_index(cursor, current_db, sql, remaining2)
+
+        elif token2 == "UNIQUE":
+            # CREATE UNIQUE INDEX [IF NOT EXISTS] <name> ON <tbl>(...)
+            _, remaining3 = next_token(remaining2)  # skip INDEX
+            self._run_sql_create_index(cursor, current_db, sql, remaining3)
+
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_drop(self, cursor, current_db, sql, remaining):
+        """处理 DROP 语句的幂等执行"""
+        token2, remaining2 = next_token(remaining)
+        token2 = token2.upper()
+
+        if token2 == "TABLE":
+            # DROP TABLE [IF EXISTS] <name>
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_token(remaining3)  # skip EXISTS
+                token3, _ = next_token(remaining3)
+            name = self.get_real_name(token3)
+            check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "VIEW":
+            # DROP VIEW [IF EXISTS] <name>
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_token(remaining3)  # skip EXISTS
+                token3, _ = next_token(remaining3)
+            name = self.get_real_name(token3)
+            check_sql = self.QUERY_VIEW_SQL.format(db_name=current_db, view_name=name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] view {name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "INDEX":
+            self._run_sql_drop_index(cursor, current_db, sql, remaining2)
+
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_create_index(self, cursor, current_db, sql, remaining):
+        """处理 CREATE [UNIQUE] INDEX 的幂等执行"""
+        if self.QUERY_INDEX_SQL is None:
+            cursor.execute(sql)
+            return
+        # [IF NOT EXISTS] <idx_name> ON <tbl>(...)
+        token, remaining2 = next_token(remaining)
+        if token.upper() == "IF":
+            _, remaining2 = next_tokens(remaining2, 2)  # skip NOT EXISTS
+            token, remaining2 = next_token(remaining2)
+        idx_name = self.get_real_name(token)
+        _, remaining2 = next_token(remaining2)  # skip ON
+        tbl_token, _ = next_token(remaining2)
+        idx = tbl_token.find("(")
+        tbl_raw = tbl_token[:idx] if idx != -1 else tbl_token
+        tbl_name = self._parse_object_name(tbl_raw)
+        check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
+        if self._check_exists(cursor, check_sql):
+            if self.logger:
+                self.logger.info(f"[run_sql] index {idx_name} 已存在, 跳过: {sql}")
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_drop_index(self, cursor, current_db, sql, remaining):
+        """处理 DROP INDEX 的幂等执行，默认直接执行（依赖 SQL 自带的 IF EXISTS），子类可 override"""
+        cursor.execute(sql)
+
+    def _run_sql_alter(self, cursor, current_db, sql, remaining):
+        """处理 ALTER 语句的幂等执行，默认直接执行，子类可 override"""
+        cursor.execute(sql)
+
+    def _run_sql_rename(self, cursor, current_db, sql, remaining):
+        """处理 RENAME 语句的幂等执行，默认直接执行，子类可 override"""
+        cursor.execute(sql)
 
     def list_tables_by_db(self, db_name: str) -> list:
         """获取数据库所有表名"""

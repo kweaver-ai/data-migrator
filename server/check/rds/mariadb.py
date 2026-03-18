@@ -23,6 +23,7 @@ class CheckMariaDB(CheckRDS):
         self.DROP_DATABASE_SQL = "DROP DATABASE IF EXISTS {db_name}"
         self.QUERY_TABLES_SQL = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='{db_name}'"
         self.QUERY_TABLE_SQL = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='{db_name}' AND TABLE_NAME='{table_name}'"
+        self.QUERY_VIEW_SQL = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA='{db_name}' AND TABLE_NAME='{view_name}'"
         self.RENAME_TABLE_SQL = "RENAME TABLE IF EXISTS {db_name}.{table_name} TO {new_name}"
         self.DROP_TABLE_SQL = "DROP TABLE IF EXISTS {db_name}.{table_name}"
 
@@ -46,6 +47,149 @@ class CheckMariaDB(CheckRDS):
         self.DROP_CONSTRAINT_SQL = "ALTER TABLE {db_name}.{table_name} DROP CONSTRAINT IF EXISTS {constraint_name}"
 
         super().__init__(check_config, logger)
+
+    def _run_sql_drop_index(self, cursor, current_db, sql, remaining):
+        # MariaDB 语法: DROP INDEX [IF EXISTS] <idx> ON <tbl>
+        token, remaining = next_token(remaining)
+        if token.upper() == "IF":
+            _, remaining = next_token(remaining)  # skip EXISTS
+            token, remaining = next_token(remaining)
+        idx_name = self.get_real_name(token)
+        _, remaining = next_token(remaining)  # skip ON
+        tbl_token, _ = next_token(remaining)
+        tbl_name = self.get_real_name(tbl_token)
+        check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
+        if self._check_exists(cursor, check_sql):
+            cursor.execute(sql)
+        elif self.logger:
+            self.logger.info(f"[run_sql] index {idx_name} 不存在, 跳过: {sql}")
+
+    def _run_sql_alter(self, cursor, current_db, sql, remaining):
+        # ALTER TABLE <db.tbl> <action> <obj_type> ...
+        token2, remaining2 = next_token(remaining)
+        if token2.upper() != "TABLE":
+            cursor.execute(sql)
+            return
+
+        tbl_token, remaining3 = next_token(remaining2)
+        tbl_name = self._parse_object_name(tbl_token)
+        action, remaining4 = next_token(remaining3)
+        action = action.upper()
+        obj_type, remaining5 = next_token(remaining4)
+        obj_type_upper = obj_type.upper()
+
+        if action == "ADD" and obj_type_upper == "COLUMN":
+            # ADD COLUMN [IF NOT EXISTS] col_name ...
+            token, _ = next_token(remaining5)
+            if token.upper() == "IF":
+                _, remaining5 = next_tokens(remaining5, 3)  # skip IF NOT EXISTS
+                token, _ = next_token(remaining5)
+            col_name = self.get_real_name(token)
+            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "DROP" and obj_type_upper == "COLUMN":
+            # DROP COLUMN [IF EXISTS] col_name
+            token, remaining6 = next_token(remaining5)
+            if token.upper() == "IF":
+                _, remaining6 = next_token(remaining6)  # skip EXISTS
+                token, _ = next_token(remaining6)
+            col_name = self.get_real_name(token)
+            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "MODIFY" and obj_type_upper == "COLUMN":
+            # MODIFY COLUMN [IF EXISTS] col_name ...
+            token, remaining6 = next_token(remaining5)
+            if token.upper() == "IF":
+                _, remaining6 = next_token(remaining6)  # skip EXISTS
+                token, _ = next_token(remaining6)
+            col_name = self.get_real_name(token)
+            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "RENAME" and obj_type_upper == "COLUMN":
+            # RENAME COLUMN [IF EXISTS] col_name TO new_name
+            token, remaining6 = next_token(remaining5)
+            if token.upper() == "IF":
+                _, remaining6 = next_token(remaining6)  # skip EXISTS
+                token, _ = next_token(remaining6)
+            col_name = self.get_real_name(token)
+            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "RENAME" and obj_type_upper == "INDEX":
+            # RENAME INDEX idx_name TO new_name
+            idx_token, _ = next_token(remaining5)
+            idx_name = self.get_real_name(idx_token)
+            check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] index {idx_name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "ADD" and obj_type_upper == "CONSTRAINT":
+            # ADD CONSTRAINT constraint_name ...
+            constraint_token, _ = next_token(remaining5)
+            constraint_name = self.get_real_name(constraint_token)
+            check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        elif action == "DROP" and obj_type_upper == "CONSTRAINT":
+            # DROP CONSTRAINT [IF EXISTS] constraint_name
+            token, remaining6 = next_token(remaining5)
+            if token.upper() == "IF":
+                _, remaining6 = next_token(remaining6)  # skip EXISTS
+                token, _ = next_token(remaining6)
+            constraint_name = self.get_real_name(token)
+            check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过: {sql}")
+            else:
+                cursor.execute(sql)
+
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_rename(self, cursor, current_db, sql, remaining):
+        # RENAME TABLE [IF EXISTS] db.tbl TO new_name
+        token2, remaining2 = next_token(remaining)
+        if token2.upper() != "TABLE":
+            cursor.execute(sql)
+            return
+        token3, remaining3 = next_token(remaining2)
+        if token3.upper() == "IF":
+            _, remaining3 = next_token(remaining3)  # skip EXISTS
+            token3, _ = next_token(remaining3)
+        tbl_name = self._parse_object_name(token3)
+        check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=tbl_name)
+        if not self._check_exists(cursor, check_sql):
+            if self.logger:
+                self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过: {sql}")
+        else:
+            cursor.execute(sql)
 
     def get_column_type(self, column: dict) -> tuple:
         data_type = column["DATA_TYPE"].upper()

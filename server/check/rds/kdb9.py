@@ -25,6 +25,9 @@ class CheckKDB9(CheckRDS):
         self.QUERY_TABLE_SQL = (
             "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG='proton' AND TABLE_SCHEMA='{db_name}' AND TABLE_NAME='{table_name}'"
         )
+        self.QUERY_VIEW_SQL = (
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_CATALOG='proton' AND TABLE_SCHEMA='{db_name}' AND TABLE_NAME='{view_name}'"
+        )
         self.RENAME_TABLE_SQL = "ALTER TABLE IF EXISTS {db_name}.{table_name} RENAME TO {new_name}"
         self.DROP_TABLE_SQL = "DROP TABLE IF EXISTS {db_name}.{table_name} CASCADE"
 
@@ -48,6 +51,144 @@ class CheckKDB9(CheckRDS):
         self.DROP_CONSTRAINT_SQL = "ALTER TABLE {db_name}.{table_name} DROP CONSTRAINT IF EXISTS {constraint_name} CASCADE"
 
         super().__init__(check_config, logger)
+
+    def _run_sql_alter(self, cursor, current_db, sql, remaining):
+        token2, remaining2 = next_token(remaining)
+        if token2.upper() != "TABLE":
+            cursor.execute(sql)
+            return
+
+        # KDB9: ALTER TABLE [IF EXISTS] db.tbl ...
+        tbl_token, remaining3 = next_token(remaining2)
+        if tbl_token.upper() == "IF":
+            _, remaining3 = next_token(remaining3)  # skip EXISTS
+            tbl_token, remaining3 = next_token(remaining3)
+        tbl_name = self._parse_object_name(tbl_token)
+        action, remaining4 = next_token(remaining3)
+        action = action.upper()
+
+        if action == "ADD":
+            obj_type, remaining5 = next_token(remaining4)
+            obj_type_upper = obj_type.upper()
+
+            if obj_type_upper == "COLUMN":
+                # ADD COLUMN [IF NOT EXISTS] col_name ...
+                token, _ = next_token(remaining5)
+                if token.upper() == "IF":
+                    _, remaining5 = next_tokens(remaining5, 3)  # skip IF NOT EXISTS
+                    token, _ = next_token(remaining5)
+                col_name = self.get_real_name(token)
+                check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+                if self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            elif obj_type_upper == "CONSTRAINT":
+                # ADD CONSTRAINT constraint_name ...
+                constraint_token, _ = next_token(remaining5)
+                constraint_name = self.get_real_name(constraint_token)
+                check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
+                if self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            else:
+                cursor.execute(sql)
+
+        elif action == "DROP":
+            obj_type, remaining5 = next_token(remaining4)
+            obj_type_upper = obj_type.upper()
+
+            if obj_type_upper == "COLUMN":
+                # DROP COLUMN [IF EXISTS] col_name
+                token, remaining6 = next_token(remaining5)
+                if token.upper() == "IF":
+                    _, remaining6 = next_token(remaining6)  # skip EXISTS
+                    token, _ = next_token(remaining6)
+                col_name = self.get_real_name(token)
+                check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            elif obj_type_upper == "CONSTRAINT":
+                # DROP CONSTRAINT [IF EXISTS] constraint_name [CASCADE]
+                token, remaining6 = next_token(remaining5)
+                if token.upper() == "IF":
+                    _, remaining6 = next_token(remaining6)  # skip EXISTS
+                    token, _ = next_token(remaining6)
+                constraint_name = self.get_real_name(token)
+                check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            else:
+                cursor.execute(sql)
+
+        elif action == "MODIFY":
+            # KDB9: MODIFY COLUMN col_name ...
+            obj_type, remaining5 = next_token(remaining4)
+            if obj_type.upper() == "COLUMN":
+                col_token, _ = next_token(remaining5)
+                col_name = self.get_real_name(col_token)
+                check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+            else:
+                cursor.execute(sql)
+
+        elif action == "RENAME":
+            obj_type, remaining5 = next_token(remaining4)
+            obj_type_upper = obj_type.upper()
+
+            if obj_type_upper == "COLUMN":
+                # RENAME COLUMN col_name TO new_name
+                col_token, _ = next_token(remaining5)
+                col_name = self.get_real_name(col_token)
+                check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            elif obj_type_upper == "CONSTRAINT":
+                # RENAME CONSTRAINT constraint_name TO new_name
+                constraint_token, _ = next_token(remaining5)
+                constraint_name = self.get_real_name(constraint_token)
+                check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            elif obj_type_upper == "TO":
+                # ALTER TABLE [IF EXISTS] db.tbl RENAME TO new — 表重命名
+                check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=tbl_name)
+                if not self._check_exists(cursor, check_sql):
+                    if self.logger:
+                        self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过: {sql}")
+                else:
+                    cursor.execute(sql)
+
+            else:
+                cursor.execute(sql)
+
+        else:
+            cursor.execute(sql)
 
     def get_column_type(self, column: dict) -> tuple:
         data_type = column["DATA_TYPE"].upper()
