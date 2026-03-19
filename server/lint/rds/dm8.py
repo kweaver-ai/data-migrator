@@ -11,7 +11,7 @@ from server.utils.token import next_token, next_tokens
 
 
 class LintDM8(DM8Parser, LintRDS):
-    def __init__(self, check_config: CheckConfig, logger: Logger = None):
+    def __init__(self, check_config: CheckConfig, logger: Logger):
         LintRDS.__init__(self, check_config, logger)
 
     # ── check_init / check_update ────────────────────────────────────────────
@@ -84,8 +84,10 @@ class LintDM8(DM8Parser, LintRDS):
                 token2 = token2.upper()
                 if token2 == "TABLE":
                     self._parse_and_check_create_table(sql, db)
-                elif token2 in ("UNIQUE", "INDEX"):
-                    continue
+                elif token2 == "UNIQUE":
+                    self._parse_and_check_create_unique_index(sql, db)
+                elif token2 == "INDEX":
+                    self._parse_and_check_create_index(sql, db)
                 elif token2 == "VIEW":
                     continue
                 elif token2 == "OR":
@@ -118,11 +120,10 @@ class LintDM8(DM8Parser, LintRDS):
                 or tokens[2].upper() != "IF" or tokens[3].upper() != "NOT" or tokens[4].upper() != "EXISTS"):
             raise Exception(f"建表语句需要以 'CREATE TABLE IF NOT EXISTS' 开头: {sql}")
 
-        l_idx = remaining_sql.find("(")
-        if l_idx == -1:
-            raise Exception(f"不合法的建表语句, 缺少 '(': {sql}")
-        table_name = self.get_real_name(remaining_sql[:l_idx])
+        table_name_tok, remaining_sql = next_token(remaining_sql)
+        table_name = self.get_real_name(table_name_tok)
         table = Table(table_name, self.logger)
+        # remaining_sql now starts with "(...)"
 
         r_idx = remaining_sql.rfind(")")
         if r_idx == -1:
@@ -130,7 +131,7 @@ class LintDM8(DM8Parser, LintRDS):
 
         self._parse_table_options(remaining_sql[r_idx + 1:].strip(" ;"), table)
 
-        for col_sql in remaining_sql[l_idx + 1:r_idx].splitlines():
+        for col_sql in remaining_sql[1:r_idx].splitlines():  # skip opening "("
             col_sql = col_sql.strip(" ,\t")
             if col_sql:
                 self._parse_table_struct(col_sql, table)
@@ -218,8 +219,7 @@ class LintDM8(DM8Parser, LintRDS):
     def _check_table(self, table: Table):
         if table.PrimaryIndex is None:
             if self.check_config.AllowNonePrimaryKey:
-                if self.logger:
-                    self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
+                self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
             else:
                 raise Exception(f"表 '{table.TableName}' 中缺少主键索引")
         else:
@@ -240,8 +240,7 @@ class LintDM8(DM8Parser, LintRDS):
 
         if table.ForeignKeys:
             if self.check_config.AllowForeignKey:
-                if self.logger:
-                    self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
+                self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
             else:
                 raise Exception(f"表 '{table.TableName}' 中存在外键约束, 但配置中不允许外键约束")
 

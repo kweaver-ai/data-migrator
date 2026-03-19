@@ -16,7 +16,7 @@ class CheckMariaDB(MariaDBDialect, LintMariaDB):
     - LintMariaDB 提供 check_init、check_update、check_column 等静态校验
     """
 
-    def __init__(self, check_config: CheckConfig, logger: Logger = None, is_primary: bool = True):
+    def __init__(self, check_config: CheckConfig, logger: Logger, is_primary: bool = True):
         rds_cfg = load_rds_config()["mariadb"]
         section = rds_cfg["primary"] if is_primary else rds_cfg["secondary"]
         conn_config = {**section, "DB_TYPE": "MARIADB"}

@@ -14,7 +14,7 @@ class LintRDS(ABC):
     无 DB 连接，无 rdsdriver 引用，可在无数据库的 CI 环境中运行。
     """
 
-    def __init__(self, check_config: CheckConfig, logger: Logger = None):
+    def __init__(self, check_config: CheckConfig, logger: Logger):
         self.check_config = check_config
         self.logger = logger
 

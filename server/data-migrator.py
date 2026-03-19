@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="data-migrator",
-        description="数据库迁移引擎：迁移 / 收集 / 校验",
+        description="数据库迁移引擎：collect / lint / check / migrate",
     )
     subparsers = parser.add_subparsers(dest="command", help="子命令")
 

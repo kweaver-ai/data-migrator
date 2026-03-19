@@ -11,7 +11,7 @@ from server.utils.token import next_token, next_tokens
 
 
 class LintMariaDB(MariaDBParser, LintRDS):
-    def __init__(self, check_config: CheckConfig, logger: Logger = None):
+    def __init__(self, check_config: CheckConfig, logger: Logger):
         LintRDS.__init__(self, check_config, logger)
 
     # ── check_init / check_update ────────────────────────────────────────────
@@ -110,12 +110,10 @@ class LintMariaDB(MariaDBParser, LintRDS):
         if token.upper() == "IF":
             _, remaining_sql = next_tokens(remaining_sql, 3)  # skip IF NOT EXISTS
 
-        l_idx = remaining_sql.find("(")
-        if l_idx == -1:
-            raise Exception(f"不合法的建表语句, 缺少 '(': {sql}")
-        raw_name = remaining_sql[:l_idx].strip()
-        table_name = self.get_real_name(raw_name)
+        table_name_tok, remaining_sql = next_token(remaining_sql)
+        table_name = self.get_real_name(table_name_tok)
         table = Table(table_name, self.logger)
+        # remaining_sql now starts with "(...)"
 
         r_idx = remaining_sql.rfind(")")
         if r_idx == -1:
@@ -123,7 +121,7 @@ class LintMariaDB(MariaDBParser, LintRDS):
 
         self._parse_table_options(remaining_sql[r_idx + 1:].strip(" ;"), table)
 
-        for col_sql in remaining_sql[l_idx + 1:r_idx].splitlines():
+        for col_sql in remaining_sql[1:r_idx].splitlines():  # skip opening "("
             col_sql = col_sql.strip(" ,\t")
             if col_sql:
                 self._parse_table_struct(col_sql, table)
@@ -253,8 +251,7 @@ class LintMariaDB(MariaDBParser, LintRDS):
     def _check_table(self, table: Table):
         if table.PrimaryIndex is None:
             if self.check_config.AllowNonePrimaryKey:
-                if self.logger:
-                    self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
+                self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
             else:
                 raise Exception(f"表 '{table.TableName}' 中缺少主键索引")
         else:
@@ -272,8 +269,7 @@ class LintMariaDB(MariaDBParser, LintRDS):
 
         if table.ForeignKeys:
             if self.check_config.AllowForeignKey:
-                if self.logger:
-                    self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
+                self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
             else:
                 raise Exception(f"表 '{table.TableName}' 中存在外键约束, 但配置中不允许外键约束")
 

@@ -31,12 +31,11 @@ class PrimaryIndex():
 
 
 class Index:
-  def __init__(self, table_name: str, index_name: str, logger: Logger = None):
+  def __init__(self, table_name: str, index_name: str, logger: Logger):
     pattern = r'^idx_[a-z0-9_]{1,60}$'
     if not re.fullmatch(pattern, index_name):
-      if logger:
-        logger.warning(f"索引名 '{index_name}' 需以 'idx_' 开头, 仅支持小写字母, 数字, 下划线, "
-          "长度不超过64, 建议不超过20")
+      logger.warning(f"索引名 '{index_name}' 需以 'idx_' 开头, 仅支持小写字母, 数字, 下划线, "
+        "长度不超过64, 建议不超过20")
     self.TableName = table_name
     self.IndexName = index_name
     self.Columns = {}
@@ -51,12 +50,11 @@ class Index:
 
 
 class UniqueIndex(Index):
-  def __init__(self, table_name: str, index_name: str, logger: Logger = None):
+  def __init__(self, table_name: str, index_name: str, logger: Logger):
     pattern = r'^uk_[a-z0-9_]{1,61}$'
     if not re.fullmatch(pattern, index_name):
-      if logger:
-        logger.warning(f"唯一索引名 '{index_name}' 需以 'uk_' 开头, 仅支持小写字母, 数字, 下划线, "
-          "长度不超过64, 建议不超过20")
+      logger.warning(f"唯一索引名 '{index_name}' 需以 'uk_' 开头, 仅支持小写字母, 数字, 下划线, "
+        "长度不超过64, 建议不超过20")
 
     self.TableName = table_name
     self.IndexName = index_name
@@ -64,12 +62,11 @@ class UniqueIndex(Index):
 
 
 class Table:
-  def __init__(self, table_name: str, logger: Logger = None):
+  def __init__(self, table_name: str, logger: Logger):
     pattern = r'^t_[a-z0-9_]{1,62}$'
     if not re.fullmatch(pattern, table_name):
-      if logger:
-        logger.warning(f"表名 '{table_name}' 需以 't_' 开头, 仅支持小写字母, 数字, 下划线, "
-          "长度不超过64, 建议不超过20")
+      logger.warning(f"表名 '{table_name}' 需以 't_' 开头, 仅支持小写字母, 数字, 下划线, "
+        "长度不超过64, 建议不超过20")
 
     self.TableName = table_name
     self.TableOptions = {}

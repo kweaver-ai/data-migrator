@@ -1,14 +1,6 @@
 # Data Migrator
 
-云原生数据库迁移引擎。通过 Helm Umbrella Chart 统一编排，自动完成微服务数据库的初始化与版本升级。支持 9 种异构数据库，内置 SQL 幂等预检、故障熔断与断点续传能力。
-
-## 核心特性
-
-- **伞形 Chart 顶层触发** — Umbrella Chart 顶层声明 Hook Job，一次性完成所有微服务迁移后再部署业务 Pod
-- **SQL 幂等预检** — 执行前自动解析 DDL 类型，查询元数据判断是否已生效，已生效则跳过
-- **故障熔断** — DDL 无法回滚，遇异常立即阻断发布流水线（`exit 1`），保护现场
-- **断点续传** — 失败后人工修复业务库，重新触发部署即可从断点恢复
-- **Checksum 审计** — 记录每个脚本的哈希值，跨环境一致性校验（不一致时输出警告，不阻断）
+云原生数据库迁移引擎。微服务在代码仓库中维护 `migrations/` 目录，CI 流水线通过本工具完成脚本收集、语法校验、执行校验，生产部署时由 Helm Hook 自动触发迁移。
 
 ## 支持的数据库
 
@@ -18,41 +10,20 @@
 | 信创数据库 | DM8 (达梦), KDB9 (人大金仓), GoldenDB |
 | 云/分布式数据库 | OceanBase, TDSQL, TXSQL |
 
-## 架构概览
-
-采用"统一镜像构建、伞形 Chart 顶层 Hook 触发、中心化审计"的三段式设计：
+## CI 工作流
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  CI/CD 构建阶段                                               │
-│  收集各微服务 migrations/ 目录 + 引擎代码 → 统一 Docker 镜像     │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-                           ▼
-            ┌─────────────────────────────┐
-            │  helm upgrade (Umbrella)     │
-            └──────────────┬──────────────┘
-                           │
-                           ▼
-            ┌─────────────────────────────┐
-            │  顶层 pre-install/upgrade    │
-            │  Hook Job (Migration)        │
-            │  依次为每个微服务执行迁移      │
-            └──────────────┬──────────────┘
-                           │
-                           ▼
-        ┌─────────────────────────────────────┐
-        │      deploy 管控库 (状态 + 审计)      │
-        │  schema_migration_task              │
-        │  schema_migration_history           │
-        └──────────────┬──────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-      [业务库 A]    [业务库 B]    [业务库 C]
+collect  →  lint  →  check  →  (merge)  →  migrate
+ 拉脚本    静态校验   DB校验              生产部署
+（无DB）   （无DB）  （测试DB）          （生产DB）
 ```
 
-伞形 Chart 在顶层声明 `pre-install/pre-upgrade` Hook，统一拉起一个 Migration Job。该 Job 依次为所有微服务执行迁移，全部完成后 Helm 再部署各子 Chart 的业务 Pod。
+- **`collect`** — 从 Git 仓库拉取各微服务 `migrations/` 到本地 `repos/`
+- **`lint`** — 校验目录结构合规性 + SQL 语法正确性，无 DB 依赖，适合早期快速失败
+- **`check`** — 在测试 DB 上执行 SQL，对比多 DB 类型 schema 一致性
+- **`migrate`** — 生产部署，由 Helm `pre-install/pre-upgrade` Hook 自动触发
+
+---
 
 ## 迁移脚本目录规范
 
@@ -75,20 +46,149 @@
     └── ...
 ```
 
-**目录规范：**
-- 数据库类型目录名必须小写（`mariadb`、`dm8`、`kdb9`、`mysql` 等）
+**规范要点：**
+- 数据库类型目录名必须小写（`mariadb`、`dm8`、`kdb9` 等）
+- 版本目录名为 semver 格式（`1.0.0`、`1.1.0`）
 - 升级脚本编号 `01` ~ `99`，按编号顺序执行
-- 仅支持 `.sql` 和 `.py` 两种格式（`.json` 支持，但不建议继续使用）
+- 支持 `.sql` 和 `.py` 两种格式（`.json` 支持但不建议继续使用）
 
-**`init.sql` 定位：** 是该版本的完整数据库快照，而非增量脚本。`V_base` 版本目录中的编号增量脚本不会被执行，因为 `init.sql` 已经是该版本的终态。
+**`init.sql` 定位：** 是该版本的完整数据库快照，而非增量脚本。包含 `init.sql` 的版本目录，其编号增量脚本不会被执行——`init.sql` 已是该版本的终态。
 
-**Python 脚本：** 以子进程方式执行，通过环境变量注入数据库连接信息。
+**Python 脚本：** 以子进程方式执行，通过环境变量注入数据库连接信息（`DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWD`、`DB_TYPE`）。
 
-## 迁移工作流
+---
 
-### 核心状态机
+## 使用方式
 
-引擎启动后执行严格的单向状态机流转：
+### 通用参数
+
+所有子命令均支持以下参数：
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `--config` | 是 | YAML 配置文件路径，参见 `config-template.yaml` |
+| `--service` | 否 | 指定本次操作的服务名称，空格分隔；默认处理配置中全部服务 |
+| `--log-level` | 否 | `DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
+
+### collect — 拉取迁移脚本
+
+```bash
+MY_PAT=<github_pat> python data-migrator.py collect \
+  --config config.yaml \
+  --service bkn-backend vega-backend
+```
+
+`MY_PAT` 仅在 `repos/<service>` 目录不存在时才需要（用于克隆私有仓库）。目录已存在则跳过克隆。
+
+### lint — 静态校验（无需 DB）
+
+```bash
+python data-migrator.py lint \
+  --config config.yaml \
+  --service bkn-backend vega-backend
+```
+
+校验内容：
+- 目录结构：db 类型目录名、版本号格式、文件命名规范
+- `init.sql`：`USE` 语句存在性、建表语法、表名/索引名命名规范、主键存在性
+- 升级脚本：仅允许合法的 DDL / DML 语句类型
+
+### check — 执行校验（需要测试 DB）
+
+```bash
+CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml \
+  python data-migrator.py check \
+  --config config.yaml \
+  --service bkn-backend vega-backend
+```
+
+`check_rds_config.yaml` 指定各数据库类型的测试实例连接信息（默认路径 `server/check/rds/check_rds_config.yaml`）：
+
+```yaml
+mariadb:
+  primary:
+    host: "127.0.0.1"
+    port: 3330
+    user: "root"
+    password: "xxx"
+    charset: "utf8mb4"
+    autocommit: true
+  secondary:
+    host: "127.0.0.1"
+    port: 3331
+    user: "root"
+    password: "xxx"
+    charset: "utf8mb4"
+    autocommit: true
+dm8:
+  primary:
+    host: "127.0.0.1"
+    port: 5237
+    user: "SYSDBA"
+    password: "xxx"
+    autocommit: true
+  secondary:
+    host: "127.0.0.1"
+    port: 5238
+    user: "SYSDBA"
+    password: "xxx"
+    autocommit: true
+```
+
+> 建议将此文件放在项目根目录（已加入 `.gitignore`），通过 `CHECK_RDS_CONFIG` 指向，避免意外提交凭证。
+
+### migrate — 执行迁移（生产部署）
+
+通常由 Helm Hook 自动触发，无需手动执行。本地调试时：
+
+```bash
+python data-migrator.py migrate \
+  --config /app/config.yaml \
+  --service service-a service-b service-c
+```
+
+### 本地开发环境变量
+
+推荐在项目根创建 `.env` 文件（已加入 `.gitignore`）：
+
+```bash
+export MY_PAT=github_pat_xxxx
+export CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml
+```
+
+| 环境变量 | 用于子命令 | 说明 |
+|----------|-----------|------|
+| `MY_PAT` | `collect` | GitHub PAT，拉取私有仓库时使用 |
+| `CHECK_RDS_CONFIG` | `check` | 测试 DB 连接配置文件路径 |
+
+---
+
+## 技术限制
+
+- **DDL 不可回滚** — 多数数据库 DDL 触发隐式提交，失败后需人工修复业务库，引擎通过熔断锁定保护现场
+- **SQL 幂等预检局限** — 基于 sqlparse 解析，极其复杂的非标准 SQL 可能识别失败，此类语句将直接执行
+- **凭证可见性** — Helm values 中的密码经 kubelet 展开后明文出现在 Pod Spec 中，建议通过 RBAC 限制读取权限
+
+---
+
+## 平台参考
+
+> 以下内容面向平台/运维同学，微服务开发者通常无需关心。
+
+### 迁移工作流
+
+#### 脚本筛选规则
+
+**首次安装：**
+1. 从 `TARGET_VERSION` 逆序回溯，找到最近包含 `init.sql` 的版本目录（记为 `V_base`）
+2. 执行 `V_base/init.sql`（完整快照）
+3. 按序执行 `V_base` **之后**所有版本的编号增量脚本（`V_base` 自身的增量脚本不执行）
+
+**版本升级：**
+1. 跳过所有版本的 `init.sql`
+2. 从当前记录版本之后开始，按序执行各版本的编号增量脚本
+
+#### 核心状态机
 
 ```
 [节点 0] Helm Hook 拉起 Pod，通过 CLI args 接收全部配置
@@ -109,18 +209,7 @@
 [节点 4] 全部成功 → status='success', exit 0
 ```
 
-### 脚本筛选规则
-
-**首次安装：**
-1. 从 `TARGET_VERSION` 逆序回溯，找到最近的包含 `init.sql` 的版本目录（记为 `V_base`）
-2. 执行 `V_base/init.sql`（完整快照）
-3. 按序执行 `V_base` **之后**所有版本的编号增量脚本（`V_base` 自身的增量脚本不执行）
-
-**版本升级：**
-1. 跳过所有版本的 `init.sql`
-2. 从当前记录版本之后开始，按序执行各版本的编号增量脚本
-
-### SQL 幂等预检
+#### SQL 幂等预检
 
 对每个 `.sql` 文件：
 1. `sqlparse.split()` 拆分为独立语句
@@ -128,11 +217,27 @@
 3. 对每条语句：解析 DDL 类型 → 查询元数据判断是否已生效 → 已生效跳过，未生效执行
 4. 执行失败 → 记录异常，主任务置为 `fail`，`exit 1`
 
-## 数据库设计
+### Helm 集成与统一镜像构建
 
-`deploy` 管控库中采用"任务主表 + 历史流水表"双表设计：
+Hook Job 声明在 Umbrella Chart 的顶层，而非各子 Chart 内部。Helm 执行 `install/upgrade` 时先拉起此 Job 完成所有微服务的迁移，成功后再部署各子 Chart 的业务 Pod。
 
-### `schema_migration_task` — 任务管控
+CI/CD 将各微服务 migrations 目录与引擎代码打包为统一镜像：
+
+```
+/app/
+├── engine/                     # 迁移引擎代码
+│   ├── data-migrator.py
+│   └── ...
+└── migrations/                 # 全量微服务迁移脚本
+    ├── service-a/
+    │   ├── mariadb/
+    │   └── dm8/
+    └── service-b/
+```
+
+### 管控库表结构
+
+`deploy` 管控库采用"任务主表 + 历史流水表"双表设计：
 
 ```sql
 CREATE TABLE IF NOT EXISTS `schema_migration_task` (
@@ -147,11 +252,7 @@ CREATE TABLE IF NOT EXISTS `schema_migration_task` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_service_version` (`service_name`, `target_version`)
 );
-```
 
-### `schema_migration_history` — 单步执行流水
-
-```sql
 CREATE TABLE IF NOT EXISTS `schema_migration_history` (
   `id`                BIGINT(20) NOT NULL AUTO_INCREMENT,
   `service_name`      VARCHAR(50) NOT NULL,
@@ -166,104 +267,11 @@ CREATE TABLE IF NOT EXISTS `schema_migration_history` (
 );
 ```
 
-## 使用方式
-
-### 子命令
-
-| 子命令 | 说明 |
-|--------|------|
-| `migrate` | 执行数据库迁移（初始化 + 增量升级） |
-| `collect` | 从 Git 仓库下载和收集各微服务的 migrations 脚本文件 |
-| `check` | 检测和验证迁移脚本的目录结构与 SQL 正确性 |
-
-### 通用参数
-
-| 参数 | 说明 |
-|------|------|
-| `--config` | 配置文件路径（包含数据库连接、目标版本等） |
-| `--service` | 微服务列表，指定本次操作的微服务范围 |
-
-### 迁移执行（通过 Umbrella Chart 顶层 Hook 自动触发）
-
-```bash
-python data-migrator.py migrate \
-  --config /app/config.yaml \
-  --service service-a service-b service-c
-```
-
-### 收集迁移脚本
-
-```bash
-MY_PAT=<github_pat> python data-migrator.py collect \
-  --config /app/config.yaml \
-  --service service-a service-b service-c
-```
-
-> `MY_PAT` 仅在本地目录不存在、需要从 GitHub 克隆时才会用到。若 `source_code/<service>` 目录已存在，则跳过克隆、无需设置。
-
-### 检测和验证
-
-```bash
-CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml \
-  python data-migrator.py check \
-  --config /app/config.yaml \
-  --service service-a service-b
-```
-
-> `CHECK_RDS_CONFIG` 指向测试数据库的连接配置文件。默认路径为 `server/check/rds/check_rds_config.yaml`，本地开发时建议将配置文件放在项目根目录并通过环境变量指向，避免意外提交。配置文件格式参见 [server/check/README.md](server/check/README.md)。
-
-### 本地开发环境变量
-
-| 环境变量 | 用途 | 默认值 |
-|----------|------|--------|
-| `MY_PAT` | GitHub Personal Access Token，collect 命令克隆代码仓库时使用 | 无 |
-| `CHECK_RDS_CONFIG` | check_rds_config.yaml 文件路径，check 命令连接测试数据库时使用 | `server/check/rds/check_rds_config.yaml` |
-
-推荐在项目根创建 `.env` 文件（已加入 `.gitignore`）存储本地配置：
-
-```bash
-export MY_PAT=github_pat_xxxx
-export CHECK_RDS_CONFIG=/root/aishu_code/data-migrator/check_rds_config.yaml
-```
-
 ### 存量环境基线补录
 
 对已有数据库但未纳入引擎管控的存量环境，通过独立的 baseline 工具脚本执行一次性基线初始化，将 `<= target_version` 的所有脚本标记为已成功执行，仅写入 `deploy` 管控库，不操作业务库。详见 baseline 工具的独立文档。
 
-## Helm 集成
-
-Hook Job 声明在 Umbrella Chart 的顶层，而非各子 Chart 内部。Helm 执行 `install/upgrade` 时先拉起此 Job 完成所有微服务的迁移，成功后再部署各子 Chart 的业务 Pod。
-
-Hook Job 模板详见 Helm Chart 模板文件。
-
-## 统一镜像构建
-
-CI/CD 将各微服务 migrations 目录与引擎代码打包为统一镜像：
-
-```
-/app/
-├── engine/                     # 迁移引擎代码
-│   ├── data-migrator.py        # 入口
-│   ├── sql_parser.py
-│   ├── db_drivers/
-│   └── requirements.txt
-└── migrations/                 # 全量微服务迁移脚本
-    ├── service-a/
-    │   ├── mariadb/
-    │   └── dm8/
-    ├── service-b/
-    └── service-c/
-```
-
-## CI 校验
-
-即 `check` 子命令，校验配置详见 `config-template.yaml`。
-
-## 技术限制
-
-- **DDL 不可回滚** — 多数数据库 DDL 触发隐式提交，失败后需人工修复业务库，引擎通过熔断锁定保护现场
-- **SQL 幂等预检局限** — 基于 sqlparse 解析，极其复杂的非标准 SQL 可能识别失败，此类语句将直接执行
-- **凭证可见性** — args 中的密码经 kubelet 展开后明文出现在 Pod Spec 中，建议通过 RBAC 限制读取权限
+---
 
 ## 依赖
 
