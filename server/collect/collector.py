@@ -30,10 +30,6 @@ class CollectExecutor:
         source_path = os.path.join(os.getcwd(), "source_code")
         os.makedirs(source_path, exist_ok=True)
 
-        pat = os.getenv("MY_PAT", "")
-        if not pat:
-            raise Exception("环境变量 MY_PAT 未设置，无法认证 GitHub")
-
         for service_name, service_cfg in self.app_config.services.items():
             project = service_cfg.project
             repo = service_cfg.repo
@@ -46,6 +42,10 @@ class CollectExecutor:
             if os.path.exists(service_path):
                 self.logger.info(f"本地目录已存在: {service_path}")
                 continue
+
+            pat = os.getenv("MY_PAT", "")
+            if not pat:
+                raise Exception("环境变量 MY_PAT 未设置，无法认证 GitHub")
 
             git_url = f"https://{pat}@github.com/{project}/{repo}.git"
             tmp_path = os.path.join(source_path, f"{service_name}_tmp")
