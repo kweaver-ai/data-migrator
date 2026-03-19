@@ -95,7 +95,7 @@ class CollectExecutor:
             self.logger.info(f"复制代码库目录: {service_name}, path={db_path}")
 
             source_path = os.path.join(os.getcwd(), "source_code", service_name, db_path)
-            repo_path = os.path.join(os.getcwd(), "repos", service_name)
+            repo_path = os.path.join(self.app_config.repo_path, service_name)
             os.makedirs(repo_path, exist_ok=True)
 
             for db_type in db_types:

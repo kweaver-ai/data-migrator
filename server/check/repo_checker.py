@@ -34,7 +34,7 @@ class RepoChecker:
         has_error = False
         for service_name, service_cfg in self.app_config.services.items():
             self.logger.info(f"检查服务目录: {service_name}")
-            repo_path = os.path.join(os.getcwd(), "repos", service_name)
+            repo_path = os.path.join(self.app_config.repo_path, service_name)
             check_from = service_cfg.check_from
             if not self._check_repo(repo_path, check_from):
                 has_error = True

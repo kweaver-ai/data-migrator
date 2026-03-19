@@ -35,3 +35,21 @@ class RDSDialect(ABC):
     QUERY_INDEX_SQL = None
     QUERY_CONSTRAINT_SQL = None
     CREATE_DATABASE_SQL = ""
+    DROP_DATABASE_SQL = ""
+
+    # JSON 升级文件执行模板（子类覆盖，None 表示不支持）
+    ADD_COLUMN_SQL = None
+    MODIFY_COLUMN_SQL = None
+    RENAME_COLUMN_SQL = None
+    DROP_COLUMN_SQL = None
+
+    ADD_INDEX_SQL = None
+    RENAME_INDEX_SQL = None
+    DROP_INDEX_SQL = None
+
+    ADD_CONSTRAINT_SQL = None
+    RENAME_CONSTRAINT_SQL = None
+    DROP_CONSTRAINT_SQL = None
+
+    RENAME_TABLE_SQL = None
+    DROP_TABLE_SQL = None

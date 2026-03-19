@@ -47,5 +47,6 @@ class AppConfig:
     db_types: List[str] = field(default_factory=lambda: ["mariadb"])
     databases: List[str] = field(default_factory=list)
     check_rules: CheckRulesConfig = field(default_factory=CheckRulesConfig)
-    script_directory_path: str = ""
+    repo_path: str = ""
     renamed_services: List[dict] = field(default_factory=list)
+    service_filter: Optional[List[str]] = None

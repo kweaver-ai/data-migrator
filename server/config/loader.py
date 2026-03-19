@@ -54,10 +54,8 @@ def load_config(config_path: str, service_filter: Optional[List[str]], logger: L
         allow_table_compare_dismatch=raw_rules.get("allow_table_compare_dismatch", False),
     )
 
-    # ── script_directory_path ──
-    script_dir = cfg.get("config", {}).get("script_directory_path", "")
-    if not script_dir:
-        script_dir = os.path.join(os.getcwd(), "repos")
+    # ── repo_path ──
+    repo_path = os.path.join(os.getcwd(), "repos")
 
     app_config = AppConfig(
         rds=rds_config,
@@ -65,8 +63,9 @@ def load_config(config_path: str, service_filter: Optional[List[str]], logger: L
         db_types=[t.lower() for t in cfg.get("db_types", ["mariadb"])],
         databases=[d.lower() for d in cfg.get("databases", [])],
         check_rules=check_rules,
-        script_directory_path=script_dir,
+        repo_path=repo_path,
         renamed_services=cfg.get("renamed_services") or [],
+        service_filter=service_filter or None,
     )
 
     # 注入环境变量供 .py 脚本使用

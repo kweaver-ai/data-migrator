@@ -24,6 +24,7 @@ from server.migrate.task_manager import TaskManager
 from server.migrate.history_manager import HistoryManager
 from server.migrate.script_selector import ScriptSelector
 from server.migrate.idempotency import IdempotencyChecker
+from server.migrate.json_executor import JsonExecutor
 from server.utils.sql import parse_sql_file
 
 
@@ -64,6 +65,7 @@ class MigrationExecutor:
         self.history_mgr = HistoryManager(app_config.rds, logger)
         self.script_selector = ScriptSelector(app_config, logger)
         self.idempotency = IdempotencyChecker(self.operate_db, self.dialect, logger)
+        self.json_executor = JsonExecutor(self.operate_db, self.dialect, logger)
         self.deploy_db = app_config.rds.get_deploy_db_name()
 
     def run(self):
@@ -113,7 +115,7 @@ class MigrationExecutor:
 
     def _list_services(self):
         """获取要迁移的服务列表"""
-        script_dir = self.app_config.script_directory_path
+        script_dir = self.app_config.repo_path
         if not os.path.isdir(script_dir):
             self.logger.warning(f"脚本目录不存在: {script_dir}")
             return []
@@ -122,8 +124,10 @@ class MigrationExecutor:
         if self.app_config.services:
             return list(self.app_config.services.keys())
 
+        svc_filter = self.app_config.service_filter
         return [d for d in os.listdir(script_dir)
-                if os.path.isdir(os.path.join(script_dir, d))]
+                if os.path.isdir(os.path.join(script_dir, d))
+                and (not svc_filter or d in svc_filter)]
 
     def _migrate_service(self, service_name: str):
         """迁移单个服务"""
@@ -279,6 +283,9 @@ class MigrationExecutor:
         if ext == ".sql":
             sql_list = parse_sql_file(script_path, self.logger)
             self._execute_sql_list_with_idempotency(sql_list)
+
+        elif ext == ".json":
+            self.json_executor.execute(script_path)
 
         elif ext == ".py":
             custom_env = os.environ.copy()

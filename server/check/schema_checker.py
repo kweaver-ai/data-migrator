@@ -9,13 +9,11 @@ import os
 import subprocess
 import sys
 from logging import Logger
-
-import rdsdriver
 import sqlparse
 
 from server.config.models import AppConfig
 from server.check.check_config import CheckConfig
-from server.check.rds.base import CheckRDS
+from server.check.rds.base import CheckRDS, load_rds_config, validate_rds_config
 from server.check.rds.mariadb import CheckMariaDB
 from server.check.rds.dm8 import CheckDM8
 from server.check.rds.kdb9 import CheckKDB9
@@ -27,6 +25,7 @@ class SchemaChecker:
         self.app_config = app_config
         self.logger = logger
         self.check_config = CheckConfig(app_config)
+        validate_rds_config(load_rds_config(), app_config.db_types)
 
     def run(self):
         """SQL 执行校验主入口"""
@@ -36,7 +35,7 @@ class SchemaChecker:
 
         for service_name, service_cfg in self.app_config.services.items():
             self.logger.info(f"验证服务: {service_name}")
-            repo_path = os.path.join(os.getcwd(), "repos", service_name)
+            repo_path = os.path.join(self.app_config.repo_path, service_name)
             check_from = service_cfg.check_from
             if not self._check_repo(repo_path, check_from):
                 raise Exception(f"数据模型 {service_name} 验证失败")

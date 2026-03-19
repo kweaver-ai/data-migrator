@@ -33,6 +33,68 @@ CheckExecutor.run()
       └── 跨库 schema 对比       # _compare_schema() — 表数量和列数量一致性
 ```
 
+## RDS 连接配置（check_rds_config.yaml）
+
+阶段二执行校验需要连接真实数据库，连接信息通过独立的 `check_rds_config.yaml` 提供，与主配置文件分离。
+
+### 文件加载规则
+
+| 方式 | 说明 |
+|------|------|
+| 默认路径 | `server/check/rds/check_rds_config.yaml` |
+| 环境变量覆盖 | `CHECK_RDS_CONFIG=/path/to/your_config.yaml` |
+
+### 文件结构
+
+顶层 key 为数据库类型（`mariadb` / `dm8` / `kdb9`），每个类型下有 `primary`（主库）和 `secondary`（副库）两个连接段。连接段的字段直接透传给 `rdsdriver.connect()`。
+
+```yaml
+mariadb:
+  primary:
+    host: 127.0.0.1
+    port: 3306
+    user: root
+    password: your_password
+  secondary:
+    host: 127.0.0.1
+    port: 3306
+    user: root
+    password: your_password
+
+dm8:
+  primary:
+    host: 127.0.0.1
+    port: 5236
+    user: SYSDBA
+    password: your_password
+  secondary:
+    host: 127.0.0.1
+    port: 5236
+    user: SYSDBA
+    password: your_password
+
+kdb9:
+  primary:
+    host: 127.0.0.1
+    port: 54321
+    user: system
+    password: your_password
+  secondary:
+    host: 127.0.0.1
+    port: 54321
+    user: system
+    password: your_password
+```
+
+### 说明
+
+- 只需配置 `config.yaml` 中 `db_types` 列表里包含的数据库类型，其余类型可省略
+- `DB_TYPE` 字段由代码自动注入，**无需**在配置文件中填写
+- `secondary` 用于跨库 schema 对比阶段，如无需对比可与 `primary` 填写相同连接信息
+- 该文件含有数据库密码，**不应**提交到代码仓库，建议加入 `.gitignore`
+
+---
+
 ## 校验配置（CheckConfig）
 
 | 配置项 | 说明 |

@@ -23,7 +23,7 @@ class ScriptSelector:
     def get_service_db_type_path(self, service_name: str) -> str:
         """获取 <script_dir>/<service>/<db_type>/ 路径"""
         return os.path.join(
-            self.app_config.script_directory_path,
+            self.app_config.repo_path,
             service_name,
             self.app_config.rds.type.lower(),
         )
@@ -113,13 +113,8 @@ class ScriptSelector:
             if filename == "init.sql":
                 continue
 
-            # .json 文件：警告并跳过
-            if filename.endswith(".json"):
-                self.logger.warning(f"跳过 .json 文件: {filepath}")
-                continue
-
-            # 匹配 NN-xxx.sql 或 NN-xxx.py
-            if re.match(r"^\d+-.*\.(sql|py)$", filename):
+            # 匹配 NN-xxx.sql、NN-xxx.py 或 NN-xxx.json
+            if re.match(r"^\d+-.*\.(sql|py|json)$", filename):
                 scripts.append(filepath)
 
         if scripts:

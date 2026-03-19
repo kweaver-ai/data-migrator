@@ -27,6 +27,17 @@ def load_rds_config() -> dict:
         return yaml.safe_load(f)
 
 
+def validate_rds_config(rds_cfg: dict, required_db_types: list):
+    """校验 check_rds_config.yaml 是否包含所有需要的数据库类型，缺失时提前报错"""
+    missing = [t for t in required_db_types if t not in rds_cfg]
+    if missing:
+        config_path = os.environ.get("CHECK_RDS_CONFIG", str(_DEFAULT_CONFIG_PATH))
+        raise Exception(
+            f"check_rds_config.yaml 缺少以下数据库类型的连接配置: {missing}，"
+            f"配置文件路径: {config_path}"
+        )
+
+
 class CheckRDS(ABC):
     """RDS 检查接口类"""
 

@@ -211,3 +211,5 @@ check_rds_config.yaml
 
 repos/*
 source_code/*
+DataModel-CI-Templates
+DataModelManagement
