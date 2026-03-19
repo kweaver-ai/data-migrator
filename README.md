@@ -194,17 +194,36 @@ python data-migrator.py migrate \
 ### 收集迁移脚本
 
 ```bash
-python data-migrator.py collect \
+MY_PAT=<github_pat> python data-migrator.py collect \
   --config /app/config.yaml \
   --service service-a service-b service-c
 ```
 
+> `MY_PAT` 仅在本地目录不存在、需要从 GitHub 克隆时才会用到。若 `source_code/<service>` 目录已存在，则跳过克隆、无需设置。
+
 ### 检测和验证
 
 ```bash
-python data-migrator.py check \
+CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml \
+  python data-migrator.py check \
   --config /app/config.yaml \
   --service service-a service-b
+```
+
+> `CHECK_RDS_CONFIG` 指向测试数据库的连接配置文件。默认路径为 `server/check/rds/check_rds_config.yaml`，本地开发时建议将配置文件放在项目根目录并通过环境变量指向，避免意外提交。配置文件格式参见 [server/check/README.md](server/check/README.md)。
+
+### 本地开发环境变量
+
+| 环境变量 | 用途 | 默认值 |
+|----------|------|--------|
+| `MY_PAT` | GitHub Personal Access Token，collect 命令克隆代码仓库时使用 | 无 |
+| `CHECK_RDS_CONFIG` | check_rds_config.yaml 文件路径，check 命令连接测试数据库时使用 | `server/check/rds/check_rds_config.yaml` |
+
+推荐在项目根创建 `.env` 文件（已加入 `.gitignore`）存储本地配置：
+
+```bash
+export MY_PAT=github_pat_xxxx
+export CHECK_RDS_CONFIG=/root/aishu_code/data-migrator/check_rds_config.yaml
 ```
 
 ### 存量环境基线补录

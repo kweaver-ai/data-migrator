@@ -31,8 +31,14 @@ def build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument("--service", nargs="*", default=None, help="指定本次收集的服务（默认全部）")
     collect_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
+    # ── lint ──
+    lint_parser = subparsers.add_parser("lint", help="静态校验：目录结构 + SQL 语法（无需 DB 连接）")
+    lint_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    lint_parser.add_argument("--service", nargs="*", default=None, help="指定本次校验的服务（默认全部）")
+    lint_parser.add_argument("--log-level", default="INFO", help="日志级别")
+
     # ── check ──
-    check_parser = subparsers.add_parser("check", help="校验迁移脚本目录结构和 SQL 语法")
+    check_parser = subparsers.add_parser("check", help="执行校验：连接测试 DB，运行 SQL + schema 对比")
     check_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
     check_parser.add_argument("--service", nargs="*", default=None, help="指定本次校验的服务（默认全部）")
     check_parser.add_argument("--log-level", default="INFO", help="日志级别")
@@ -51,20 +57,20 @@ def main():
     from server.utils.log import LogDiy
     logger = LogDiy.instance().get_logger(args.log_level)
 
-    if args.command == "migrate":
-        from server.config.loader import load_config
-        app_config = load_config(args.config, args.service, logger)
-
-        from server.migrate.executor import MigrationExecutor
-        executor = MigrationExecutor(app_config, logger)
-        executor.run()
-
-    elif args.command == "collect":
+    if args.command == "collect":
         from server.config.loader import load_config
         app_config = load_config(args.config, args.service, logger)
 
         from server.collect.collector import CollectExecutor
         executor = CollectExecutor(app_config, logger)
+        executor.run()
+
+    elif args.command == "lint":
+        from server.config.loader import load_config
+        app_config = load_config(args.config, args.service, logger)
+
+        from server.lint.executor import LintExecutor
+        executor = LintExecutor(app_config, logger)
         executor.run()
 
     elif args.command == "check":
@@ -73,6 +79,14 @@ def main():
 
         from server.check.executor import CheckExecutor
         executor = CheckExecutor(app_config, logger)
+        executor.run()
+
+    elif args.command == "migrate":
+        from server.config.loader import load_config
+        app_config = load_config(args.config, args.service, logger)
+
+        from server.migrate.executor import MigrationExecutor
+        executor = MigrationExecutor(app_config, logger)
         executor.run()
 
 
