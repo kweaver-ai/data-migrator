@@ -256,10 +256,10 @@ class SchemaChecker:
             custom_env["CI_MODE"] = "true"
             custom_env["PYTHONUNBUFFERED"] = "1"
             custom_env["DB_TYPE"] = check_rds.DB_TYPE
-            custom_env["DB_HOST"] = check_rds.DB_CONFIG_ROOT["host"]
-            custom_env["DB_PORT"] = str(check_rds.DB_CONFIG_ROOT["port"])
-            custom_env["DB_USER"] = check_rds.DB_CONFIG_ROOT["user"]
-            custom_env["DB_PASSWD"] = check_rds.DB_CONFIG_ROOT["password"]
+            custom_env["DB_HOST"] = check_rds.conn_config["host"]
+            custom_env["DB_PORT"] = str(check_rds.conn_config["port"])
+            custom_env["DB_USER"] = check_rds.conn_config["user"]
+            custom_env["DB_PASSWD"] = check_rds.conn_config["password"]
 
             result = subprocess.run(
                 [sys.executable, filepath],

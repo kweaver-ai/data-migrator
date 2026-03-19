@@ -23,7 +23,6 @@ from server.db.dialect.factory import create_dialect
 from server.migrate.task_manager import TaskManager
 from server.migrate.history_manager import HistoryManager
 from server.migrate.script_selector import ScriptSelector
-from server.migrate.idempotency import IdempotencyChecker
 from server.migrate.json_executor import JsonExecutor
 from server.utils.sql import parse_sql_file
 
@@ -64,8 +63,7 @@ class MigrationExecutor:
         self.task_mgr = TaskManager(app_config.rds, logger)
         self.history_mgr = HistoryManager(app_config.rds, logger)
         self.script_selector = ScriptSelector(app_config, logger)
-        self.idempotency = IdempotencyChecker(self.operate_db, self.dialect, logger)
-        self.json_executor = JsonExecutor(self.operate_db, self.dialect, logger)
+        self.json_executor = JsonExecutor(self.dialect, logger)
         self.deploy_db = app_config.rds.get_deploy_db_name()
 
     def run(self):
@@ -307,8 +305,5 @@ class MigrationExecutor:
             self.logger.warning(f"不支持的脚本类型: {script_path}，跳过")
 
     def _execute_sql_list_with_idempotency(self, sql_list: list):
-        """带幂等预检地执行 SQL 列表"""
-        for sql in sql_list:
-            if self.idempotency.should_skip(sql):
-                continue
-            self.operate_db.run_ddl([sql])
+        """带幂等执行 SQL 列表（委托给 dialect.run_sql）"""
+        self.dialect.run_sql(sql_list)

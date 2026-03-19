@@ -1,43 +1,47 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""数据库方言抽象基类 - 去掉用户管理方法，保留 SQL 模板和 init_db_config"""
+"""数据库方言抽象基类 - 统一 check 和 migrate 的 SQL 执行逻辑"""
+import os
 from abc import ABC, abstractmethod
 from logging import Logger
 
-from server.config.models import RDSConfig
-from server.db.connection import DatabaseConnection
+try:
+    import rdsdriver
+except ImportError:
+    rdsdriver = None
+
+from server.utils.token import next_token, next_tokens
 
 
 class RDSDialect(ABC):
-    """抽象基类，定义各数据库类型的 SQL 模板和特殊初始化"""
+    """
+    统一方言基类。
+    conn_config: {host, port, user, password, DB_TYPE} — 与 rdsdriver.connect 的 kwargs 一致。
+    system_id:   migrate 场景下的租户前缀，注入到 USE/SET SCHEMA 语句的 db_name 前。
+    """
 
-    def __init__(self, rds_config: RDSConfig, logger: Logger):
+    def __init__(self, conn_config: dict, logger: Logger, system_id: str = ""):
+        self.conn_config = conn_config
         self.logger = logger
-        self.rds_config = rds_config
-        self.DB_TYPE = rds_config.type.lower()
-        self._database_connection = DatabaseConnection(rds_config)
-        self._conn = None
+        self.system_id = system_id
+        self.DB_TYPE = conn_config.get("DB_TYPE", "")
 
-    def _get_conn(self):
-        if self._conn is None:
-            self._conn = self._database_connection.get_conn()
-        return self._conn
+    # ── SQL 模板常量（子类覆盖）──────────────────────────────────────────────
 
-    @abstractmethod
-    def init_db_config(self):
-        """数据库类型特殊初始化配置"""
-        pass
-
-    # SQL 模板属性（子类覆盖）
     SET_DATABASE_SQL = ""
-    QUERY_TABLE_SQL = ""
-    QUERY_COLUMN_SQL = ""
-    QUERY_INDEX_SQL = None
-    QUERY_CONSTRAINT_SQL = None
+    QUERY_DATABASES_SQL = ""
     CREATE_DATABASE_SQL = ""
     DROP_DATABASE_SQL = ""
 
-    # JSON 升级文件执行模板（子类覆盖，None 表示不支持）
+    QUERY_TABLES_SQL = ""
+    QUERY_TABLE_SQL = ""
+    QUERY_VIEW_SQL = ""
+    QUERY_COLUMNS_SQL = ""
+    QUERY_COLUMN_SQL = ""
+    QUERY_INDEX_SQL = None
+    QUERY_CONSTRAINT_SQL = None
+    COLUMN_NAME_FIELD = ""
+
     ADD_COLUMN_SQL = None
     MODIFY_COLUMN_SQL = None
     RENAME_COLUMN_SQL = None
@@ -53,3 +57,442 @@ class RDSDialect(ABC):
 
     RENAME_TABLE_SQL = None
     DROP_TABLE_SQL = None
+
+    # ── 连接 ─────────────────────────────────────────────────────────────────
+
+    def _connect(self):
+        """打开新连接（上下文管理器）"""
+        os.environ["DB_TYPE"] = self.DB_TYPE
+        return rdsdriver.connect(**self.conn_config)
+
+    # ── 子类必须实现 ──────────────────────────────────────────────────────────
+
+    @abstractmethod
+    def get_real_name(self, name: str) -> str:
+        """去除名称中的引号和空白，各数据库引号规则不同"""
+        pass
+
+    @abstractmethod
+    def parse_sql_use_db(self, sql: str):
+        """解析切库语句（USE / SET SCHEMA / SET SEARCH_PATH TO），返回 Database 对象"""
+        pass
+
+    @abstractmethod
+    def parse_sql_column_define(self, column_name: str, column_sql: str):
+        """解析列定义 SQL，返回 Column 对象（check 用于字段校验）"""
+        pass
+
+    @abstractmethod
+    def get_column_type(self, column: dict) -> tuple:
+        """返回 (data_type, type_category) 元组"""
+        pass
+
+    # ── 可选初始化（DM8/KDB9 需要）──────────────────────────────────────────
+
+    def init_db_config(self):
+        """数据库类型特殊初始化，子类按需 override"""
+        pass
+
+    # ── 公共辅助 ─────────────────────────────────────────────────────────────
+
+    def _check_exists(self, cursor, query: str) -> bool:
+        cursor.execute(query)
+        return len(cursor.fetchall()) > 0
+
+    def _parse_object_name(self, qualified_name: str) -> str:
+        """从 db.object 或 "db"."object" 中提取最后一段对象名"""
+        if "." in qualified_name:
+            return self.get_real_name(qualified_name.split(".")[-1])
+        return self.get_real_name(qualified_name)
+
+    def _prefixed_db(self, db_name: str) -> str:
+        """为 db_name 加上 system_id 前缀（migrate 多租户）"""
+        return self.system_id + db_name if self.system_id else db_name
+
+    # ── 幂等 SQL 执行（run_sql）──────────────────────────────────────────────
+
+    def run_sql(self, sql_list: list):
+        """
+        幂等执行 SQL 列表。
+        - USE/SET SCHEMA：加 system_id 前缀后执行，跟踪 current_db
+        - CREATE TABLE/VIEW/INDEX：先查是否已存在，已存在则跳过
+        - DROP TABLE/VIEW/INDEX：先查是否存在，不存在则跳过
+        - ALTER / RENAME：调用子类可 override 的 _run_sql_alter / _run_sql_rename
+        - 其他：直接执行
+        """
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    current_db = None
+                    set_db_keyword = next_token(self.SET_DATABASE_SQL)[0].upper()
+
+                    for sql in sql_list:
+                        token, remaining = next_token(sql)
+                        token = token.upper()
+
+                        if token == set_db_keyword:
+                            db = self.parse_sql_use_db(sql)
+                            current_db = self._prefixed_db(db.DBName)
+                            exec_sql = self.SET_DATABASE_SQL.format(db_name=current_db)
+                            cursor.execute(exec_sql)
+
+                        elif token == "CREATE":
+                            self._run_sql_create(cursor, current_db, sql, remaining)
+
+                        elif token == "DROP":
+                            self._run_sql_drop(cursor, current_db, sql, remaining)
+
+                        elif token == "ALTER":
+                            self._run_sql_alter(cursor, current_db, sql, remaining)
+
+                        elif token == "RENAME":
+                            self._run_sql_rename(cursor, current_db, sql, remaining)
+
+                        else:
+                            cursor.execute(sql)
+
+        except Exception as e:
+            raise Exception(f"run_sql 失败, DB_TYPE: {self.DB_TYPE}, 错误: {e}") from e
+
+    def _run_sql_create(self, cursor, current_db, sql, remaining):
+        token2, remaining2 = next_token(remaining)
+        token2 = token2.upper()
+
+        if token2 == "TABLE":
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_tokens(remaining3, 2)
+                token3, _ = next_token(remaining3)
+            idx = token3.find("(")
+            name_raw = token3[:idx] if idx != -1 else token3
+            name = self.get_real_name(name_raw)
+            check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] table {name} 已存在, 跳过")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "VIEW":
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_tokens(remaining3, 2)
+                token3, _ = next_token(remaining3)
+            idx = token3.find("(")
+            name_raw = token3[:idx] if idx != -1 else token3
+            name = self.get_real_name(name_raw)
+            check_sql = self.QUERY_VIEW_SQL.format(db_name=current_db, view_name=name)
+            if self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] view {name} 已存在, 跳过")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "OR":
+            # CREATE OR REPLACE VIEW — 天然幂等
+            cursor.execute(sql)
+
+        elif token2 == "INDEX":
+            self._run_sql_create_index(cursor, current_db, sql, remaining2)
+
+        elif token2 == "UNIQUE":
+            _, remaining3 = next_token(remaining2)  # skip INDEX
+            self._run_sql_create_index(cursor, current_db, sql, remaining3)
+
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_drop(self, cursor, current_db, sql, remaining):
+        token2, remaining2 = next_token(remaining)
+        token2 = token2.upper()
+
+        if token2 == "TABLE":
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_token(remaining3)
+                token3, _ = next_token(remaining3)
+            name = self.get_real_name(token3)
+            check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] table {name} 不存在, 跳过")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "VIEW":
+            token3, remaining3 = next_token(remaining2)
+            if token3.upper() == "IF":
+                _, remaining3 = next_token(remaining3)
+                token3, _ = next_token(remaining3)
+            name = self.get_real_name(token3)
+            check_sql = self.QUERY_VIEW_SQL.format(db_name=current_db, view_name=name)
+            if not self._check_exists(cursor, check_sql):
+                if self.logger:
+                    self.logger.info(f"[run_sql] view {name} 不存在, 跳过")
+            else:
+                cursor.execute(sql)
+
+        elif token2 == "INDEX":
+            self._run_sql_drop_index(cursor, current_db, sql, remaining2)
+
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_create_index(self, cursor, current_db, sql, remaining):
+        if self.QUERY_INDEX_SQL is None:
+            cursor.execute(sql)
+            return
+        token, remaining2 = next_token(remaining)
+        if token.upper() == "IF":
+            _, remaining2 = next_tokens(remaining2, 2)
+            token, remaining2 = next_token(remaining2)
+        idx_name = self.get_real_name(token)
+        _, remaining2 = next_token(remaining2)  # skip ON
+        tbl_token, _ = next_token(remaining2)
+        idx = tbl_token.find("(")
+        tbl_raw = tbl_token[:idx] if idx != -1 else tbl_token
+        tbl_name = self._parse_object_name(tbl_raw)
+        check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
+        if self._check_exists(cursor, check_sql):
+            if self.logger:
+                self.logger.info(f"[run_sql] index {idx_name} 已存在, 跳过")
+        else:
+            cursor.execute(sql)
+
+    def _run_sql_drop_index(self, cursor, current_db, sql, remaining):
+        """默认直接执行（依赖 SQL 自带 IF EXISTS）；子类可 override"""
+        cursor.execute(sql)
+
+    def _run_sql_alter(self, cursor, current_db, sql, remaining):
+        """默认直接执行；子类按 DB 语法 override 以实现幂等"""
+        cursor.execute(sql)
+
+    def _run_sql_rename(self, cursor, current_db, sql, remaining):
+        """默认直接执行；子类按 DB 语法 override"""
+        cursor.execute(sql)
+
+    # ── JSON 升级文件操作（check schema 执行 / migrate 执行共用）────────────
+
+    def add_column(self, db_name, table_name, column_name, column_property, column_comment):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exists = self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
+                        db_name=db_name, table_name=table_name, column_name=column_name))
+                    if not exists:
+                        cursor.execute(self.ADD_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name,
+                            column_property=column_property, column_comment=column_comment))
+        except Exception as e:
+            raise Exception(f"add_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
+
+    def modify_column(self, db_name, table_name, column_name, column_property, column_comment):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name)):
+                        cursor.execute(self.MODIFY_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name,
+                            column_property=column_property, column_comment=column_comment))
+        except Exception as e:
+            raise Exception(f"modify_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
+
+    def rename_column(self, db_name, table_name, column_name, new_name, column_property, column_comment):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name)):
+                        cursor.execute(self.RENAME_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name,
+                            new_name=new_name, column_property=column_property, column_comment=column_comment))
+        except Exception as e:
+            raise Exception(f"rename_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
+
+    def drop_column(self, db_name, table_name, column_name):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name)):
+                        cursor.execute(self.DROP_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name))
+        except Exception as e:
+            raise Exception(f"drop_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
+
+    def add_index(self, db_name, table_name, index_type, index_name, index_property, index_comment):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exists = False
+                    if self.QUERY_INDEX_SQL:
+                        exists = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name))
+                    if not exists:
+                        cursor.execute(self.ADD_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_type=index_type,
+                            index_name=index_name, index_property=index_property, index_comment=index_comment))
+        except Exception as e:
+            raise Exception(f"add_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
+
+    def rename_index(self, db_name, table_name, index_name, new_name):
+        if self.RENAME_INDEX_SQL is None:
+            raise Exception(f"当前数据库类型 {self.DB_TYPE} 不支持 rename index")
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exist = True
+                    if self.QUERY_INDEX_SQL:
+                        exist = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name))
+                    if exist:
+                        cursor.execute(self.RENAME_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name, new_name=new_name))
+        except Exception as e:
+            raise Exception(f"rename_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
+
+    def drop_index(self, db_name, table_name, index_name):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exist = True
+                    if self.QUERY_INDEX_SQL:
+                        exist = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name))
+                    if exist:
+                        cursor.execute(self.DROP_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name))
+        except Exception as e:
+            raise Exception(f"drop_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
+
+    def add_constraint(self, db_name, table_name, constraint_name, constraint_property):
+        if self.ADD_CONSTRAINT_SQL is None:
+            raise Exception(f"当前数据库类型 {self.DB_TYPE} 不支持 add constraint")
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exists = False
+                    if self.QUERY_CONSTRAINT_SQL:
+                        exists = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name, constraint_name=constraint_name))
+                    if not exists:
+                        cursor.execute(self.ADD_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name,
+                            constraint_name=constraint_name, constraint_property=constraint_property))
+        except Exception as e:
+            raise Exception(f"add_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
+
+    def rename_constraint(self, db_name, table_name, constraint_name, new_name):
+        if self.RENAME_CONSTRAINT_SQL is None:
+            raise Exception(f"当前数据库类型 {self.DB_TYPE} 不支持 rename constraint")
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exist = True
+                    if self.QUERY_CONSTRAINT_SQL:
+                        exist = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name, constraint_name=constraint_name))
+                    if exist:
+                        cursor.execute(self.RENAME_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name,
+                            constraint_name=constraint_name, new_name=new_name))
+        except Exception as e:
+            raise Exception(f"rename_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
+
+    def drop_constraint(self, db_name, table_name, constraint_name):
+        if self.DROP_CONSTRAINT_SQL is None:
+            raise Exception(f"当前数据库类型 {self.DB_TYPE} 不支持 drop constraint")
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    exist = True
+                    if self.QUERY_CONSTRAINT_SQL:
+                        exist = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name, constraint_name=constraint_name))
+                    if exist:
+                        cursor.execute(self.DROP_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name, constraint_name=constraint_name))
+        except Exception as e:
+            raise Exception(f"drop_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
+
+    def rename_table(self, db_name, table_name, new_name):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    if self._check_exists(cursor, self.QUERY_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name)):
+                        cursor.execute(self.RENAME_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name, new_name=new_name))
+        except Exception as e:
+            raise Exception(f"rename_table: {db_name}.{table_name} 失败: {e}") from e
+
+    def drop_table(self, db_name, table_name):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    if self._check_exists(cursor, self.QUERY_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name)):
+                        cursor.execute(self.DROP_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name))
+        except Exception as e:
+            raise Exception(f"drop_table: {db_name}.{table_name} 失败: {e}") from e
+
+    def drop_db(self, db_name):
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.DROP_DATABASE_SQL.format(db_name=db_name))
+        except Exception as e:
+            raise Exception(f"drop_db: {db_name} 失败: {e}") from e
+
+    def reset_schema(self, db_names: list):
+        """重置数据库 schema（check 用：drop + create）"""
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.QUERY_DATABASES_SQL)
+                    rowlist = cursor.fetchall()
+                    current_dbs = [row[0] for row in rowlist]
+                    for db_name in db_names:
+                        if db_name in current_dbs:
+                            cursor.execute(self.DROP_DATABASE_SQL.format(db_name=db_name))
+                        cursor.execute(self.CREATE_DATABASE_SQL.format(db_name=db_name))
+        except Exception as e:
+            raise Exception(f"reset_schema: {db_names} 失败: {e}") from e
+
+    def list_tables_by_db(self, db_name: str) -> list:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.QUERY_TABLES_SQL.format(db_name=db_name))
+                    return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            raise Exception(f"list_tables_by_db: {db_name} 失败: {e}") from e
+
+    def get_table_columns(self, db_name: str, table_name: str) -> dict:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.QUERY_COLUMNS_SQL.format(db_name=db_name, table_name=table_name))
+                    columns = [desc[0] for desc in cursor.description]
+                    schema = {}
+                    for row in cursor.fetchall():
+                        row_dict = dict(zip(columns, row))
+                        col_name = row_dict[self.COLUMN_NAME_FIELD].upper()
+                        schema[col_name] = row_dict
+                    return schema
+        except Exception as e:
+            raise Exception(f"get_table_columns: {db_name}.{table_name} 失败: {e}") from e

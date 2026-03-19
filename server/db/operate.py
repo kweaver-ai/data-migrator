@@ -76,20 +76,6 @@ class OperateDB:
         finally:
             cursor.close()
 
-    def fetch_all(self, sql: str, *args):
-        """执行查询，返回所有记录"""
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(sql, args)
-            result = cursor.fetchall()
-            self.conn.commit()
-            return result
-        except Exception as ex:
-            self.conn.rollback()
-            raise ex
-        finally:
-            cursor.close()
-
     def execute(self, sql: str, *args):
         """执行更新/插入语句"""
         try:
