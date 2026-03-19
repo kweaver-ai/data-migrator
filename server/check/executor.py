@@ -7,16 +7,34 @@ import subprocess
 import sys
 from logging import Logger
 
+import yaml
 import sqlparse
 
 from server.config.models import AppConfig
 from server.check.check_config import CheckConfig
-from server.check.rds.base import load_rds_config, validate_rds_config
 from server.check.rds.mariadb import CheckMariaDB
 from server.check.rds.dm8 import CheckDM8
 from server.check.rds.kdb9 import CheckKDB9
 from server.db.dialect.base import RDSDialect
 from server.utils.version import VersionUtil
+
+_DEFAULT_RDS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "rds", "check_rds_config.yaml")
+
+
+def _load_rds_config() -> dict:
+    config_path = os.environ.get("CHECK_RDS_CONFIG", _DEFAULT_RDS_CONFIG_PATH)
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _validate_rds_config(rds_cfg: dict, required_db_types: list):
+    missing = [t for t in required_db_types if t not in rds_cfg]
+    if missing:
+        config_path = os.environ.get("CHECK_RDS_CONFIG", _DEFAULT_RDS_CONFIG_PATH)
+        raise Exception(
+            f"check_rds_config.yaml 缺少以下数据库类型的连接配置: {missing}，"
+            f"配置文件路径: {config_path}"
+        )
 
 
 class CheckExecutor:
@@ -24,7 +42,8 @@ class CheckExecutor:
         self.app_config = app_config
         self.logger = logger
         self.check_config = CheckConfig(app_config)
-        validate_rds_config(load_rds_config(), app_config.db_types)
+        self.rds_cfg = _load_rds_config()
+        _validate_rds_config(self.rds_cfg, app_config.db_types)
 
     def run(self):
         self.logger.info("开始验证数据模型脚本")
@@ -41,12 +60,13 @@ class CheckExecutor:
         self.logger.info("数据模型验证成功")
 
     def _create_check_rds(self, db_type: str, is_primary: bool = True) -> RDSDialect:
+        section = self.rds_cfg[db_type]["primary" if is_primary else "secondary"]
         if db_type == "dm8":
-            return CheckDM8(self.check_config, is_primary=is_primary)
+            return CheckDM8({**section, "DB_TYPE": "DM8"}, self.check_config, self.logger)
         elif db_type == "mariadb":
-            return CheckMariaDB(self.check_config, is_primary=is_primary)
+            return CheckMariaDB({**section, "DB_TYPE": "MARIADB"}, self.check_config, self.logger)
         elif db_type == "kdb9":
-            return CheckKDB9(self.check_config, is_primary=is_primary)
+            return CheckKDB9({**section, "DB_TYPE": "KDB9"}, self.check_config, self.logger)
         else:
             raise Exception(f"不支持的数据库类型: {db_type}")
 
@@ -259,14 +279,16 @@ class CheckExecutor:
             base_tables = base_rds.list_tables_by_db(db_name)
             check_tables = check_rds.list_tables_by_db(db_name)
 
-            diff = set(check_tables) - set(base_tables)
-            if diff:
-                raise Exception(f"数据库 {db_name} 表数量不一致, 多出: {diff}")
+            extra = set(check_tables) - set(base_tables)
+            if extra:
+                self.logger.error(f"对比库多出的表: {extra}, 基准库: {base_tables}, 对比库: {check_tables}")
+                raise Exception(f"数据库 {db_name} 表数量不一致, 对比库多出: {extra}")
 
             if not self.check_config.AllowTableCompareDismatch:
-                diff = set(base_tables) - set(check_tables)
-                if diff:
-                    raise Exception(f"数据库 {db_name} 表数量不一致, 缺少: {diff}")
+                missing = set(base_tables) - set(check_tables)
+                if missing:
+                    self.logger.error(f"对比库缺少的表: {missing}, 基准库: {base_tables}, 对比库: {check_tables}")
+                    raise Exception(f"数据库 {db_name} 表数量不一致, 对比库缺少: {missing}")
 
             for table in base_tables:
                 if table not in check_tables:
@@ -276,6 +298,19 @@ class CheckExecutor:
                 base_cols = base_rds.get_table_columns(db_name, table)
                 check_cols = check_rds.get_table_columns(db_name, table)
                 if len(base_cols) != len(check_cols):
+                    self.logger.error(f"基准库的列: {base_cols}, 对比库的列: {check_cols}")
                     raise Exception(f"表 {db_name}.{table} 列数量不一致")
+
+                for col_name, base_col in base_cols.items():
+                    if col_name not in check_cols:
+                        raise Exception(f"表 {db_name}.{table} 列 {col_name} 在对比库中不存在")
+
+                    base_type, base_category = base_rds.get_column_type(base_col)
+                    check_type, check_category = check_rds.get_column_type(check_col := check_cols[col_name])
+                    if base_category != check_category:
+                        self.logger.warning(
+                            f"表 {db_name}.{table} 列 {col_name} 数据类型不一致, "
+                            f"{base_rds.DB_TYPE}: {base_type} -> {check_rds.DB_TYPE}: {check_type}"
+                        )
 
         self.logger.info("schema 差异对比完成")
