@@ -1,3 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
 [tool.ruff]
 # 设置目标Python版本，例如 Python 3.10
 target-version = "py310"

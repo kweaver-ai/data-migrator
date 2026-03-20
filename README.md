@@ -163,6 +163,36 @@ export CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml
 
 ---
 
+## 本地开发 & 测试
+
+### 运行单元测试
+
+```bash
+# 安装依赖
+pip install pytest
+
+# 运行全部单元测试（无需 DB 连接，约 0.1s）
+python3 -m pytest
+
+# 详细输出
+python3 -m pytest -v
+```
+
+测试覆盖范围：token 解析、版本号工具、MariaDB / DM8 / KDB9 静态校验（lint）、迁移脚本选择器、MariaDB parser 层。详见 [tests/README.md](tests/README.md)。
+
+### 端到端验证
+
+```bash
+# 静态校验（无需 DB）
+python3 server/data-migrator.py lint --config config.yaml
+
+# 执行校验（需要测试 DB）
+CHECK_RDS_CONFIG=check_rds_config.yaml \
+  python3 server/data-migrator.py verify --config config.yaml
+```
+
+---
+
 ## 技术限制
 
 - **DDL 不可回滚** — 多数数据库 DDL 触发隐式提交，失败后需人工修复业务库，引擎通过熔断锁定保护现场

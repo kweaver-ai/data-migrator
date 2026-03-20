@@ -7,7 +7,7 @@ from server.lint.rds.base import LintRDS
 from server.db.dialect._parser.mariadb import MariaDBParser
 from server.verify.check_config import CheckConfig
 from server.utils.table_define import Database, Table, Index, PrimaryIndex, UniqueIndex, Column
-from server.utils.token import next_token, next_tokens
+from server.utils.token import next_token, next_tokens, find_matching_paren
 
 
 class LintMariaDB(MariaDBParser, LintRDS):
@@ -115,7 +115,7 @@ class LintMariaDB(MariaDBParser, LintRDS):
         table = Table(table_name, self.logger)
         # remaining_sql now starts with "(...)"
 
-        r_idx = remaining_sql.rfind(")")
+        r_idx = find_matching_paren(remaining_sql)
         if r_idx == -1:
             raise Exception(f"不合法的建表语句, 缺少 ')': {sql}")
 

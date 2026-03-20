@@ -3,6 +3,29 @@
 """SQL token 解析工具 — 移植自 tools/utils/util.py"""
 
 
+def find_matching_paren(sql: str) -> int:
+  """
+  从 sql[0]='(' 开始，找到对应匹配的 ')' 的位置。
+  跳过引号（', ", `）内的括号，正确处理嵌套。
+  返回 -1 表示未找到。
+  """
+  depth = 0
+  in_quote = None
+  for i, c in enumerate(sql):
+    if in_quote:
+      if c == in_quote:
+        in_quote = None
+    elif c in ("'", '"', '`'):
+      in_quote = c
+    elif c == '(':
+      depth += 1
+    elif c == ')':
+      depth -= 1
+      if depth == 0:
+        return i
+  return -1
+
+
 def next_tokens(sql: str, size: int):
   tokens = []
   remaining_sql = sql
