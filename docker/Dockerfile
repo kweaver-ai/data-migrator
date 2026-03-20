@@ -1,20 +1,22 @@
-FROM acr.aishu.cn/ict/data-model-management:5.1.0
+FROM ubuntu:24.04
 
-LABEL stage=builder
 WORKDIR /app
 
-COPY config.yaml .
-COPY docker/entrypoint.sh .
+COPY server ./server
 COPY repos ./repos
-COPY requirements.txt .
+COPY config-template.yaml ./config.yaml
 
 RUN set -ex; \
+  apt-get update; \
+  apt-get install -y git python3-pip; \
   pip3 config set global.index-url http://mirrors.aliyun.com/pypi/simple/; \
   pip3 config set install.trusted-host mirrors.aliyun.com; \
-  pip3 install -r requirements.txt;
+  pip3 install -r server/requirements.txt --break-system-packages; \
+  apt-get clean; \
+  rm -rf /var/lib/apt/lists/;
 
-# 移动模块化服务升级脚本
-RUN chmod +x /app/entrypoint.sh
-ENV DM_SVC_PATH="/tmp/conf/"
+RUN set -ex; \
+    echo "/usr/local/lib/python3.12/dist-packages/ksycopg2" > /etc/ld.so.conf.d/ksycopg2.conf; \
+    ldconfig;
 
-CMD /app/entrypoint.sh /app/dist/data-model-management/data-model-management
+CMD ["python3", "server/data-migrator.py"]

@@ -1,5 +1,0 @@
-apiVersion: v1
-appVersion: 6.2.0
-description: A Helm chart for dm-post
-name: dm-post
-version: 6.2.0
