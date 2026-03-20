@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import sqlparse
 
 from server.config.models import AppConfig
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 from server.utils.version import VersionUtil
 
 if TYPE_CHECKING:

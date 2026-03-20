@@ -3,7 +3,7 @@
 """KDB9 校验实现 — 继承 KDB9Dialect (DB) + LintKDB9 (静态校验)"""
 from logging import Logger
 
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 from server.db.dialect.kdb9 import KDB9Dialect
 from server.lint.rds.kdb9 import LintKDB9
 

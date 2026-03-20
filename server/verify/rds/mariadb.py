@@ -3,7 +3,7 @@
 """MariaDB 校验实现 — 继承 MariaDBDialect (DB) + LintMariaDB (静态校验)"""
 from logging import Logger
 
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 from server.db.dialect.mariadb import MariaDBDialect
 from server.lint.rds.mariadb import LintMariaDB
 

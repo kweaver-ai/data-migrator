@@ -13,14 +13,14 @@
 ## CI 工作流
 
 ```
-collect  →  lint  →  check  →  (merge)  →  migrate
- 拉脚本    静态校验   DB校验              生产部署
-（无DB）   （无DB）  （测试DB）          （生产DB）
+fetch  →  lint  →  verify  →  (merge)  →  migrate
+ 拉脚本    静态校验    DB校验              生产部署
+（无DB）  （无DB）   （测试DB）          （生产DB）
 ```
 
-- **`collect`** — 从 Git 仓库拉取各微服务 `migrations/` 到本地 `repos/`
+- **`fetch`** — 从 Git 仓库拉取各微服务 `migrations/` 到本地 `repos/`
 - **`lint`** — 校验目录结构合规性 + SQL 语法正确性，无 DB 依赖，适合早期快速失败
-- **`check`** — 在测试 DB 上执行 SQL，对比多 DB 类型 schema 一致性
+- **`verify`** — 在测试 DB 上执行 SQL，对比多 DB 类型 schema 一致性
 - **`migrate`** — 生产部署，由 Helm `pre-install/pre-upgrade` Hook 自动触发
 
 ---
@@ -70,10 +70,10 @@ collect  →  lint  →  check  →  (merge)  →  migrate
 | `--service` | 否 | 指定本次操作的服务名称，空格分隔；默认处理配置中全部服务 |
 | `--log-level` | 否 | `DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
 
-### collect — 拉取迁移脚本
+### fetch — 拉取迁移脚本
 
 ```bash
-MY_PAT=<github_pat> python data-migrator.py collect \
+MY_PAT=<github_pat> python data-migrator.py fetch \
   --config config.yaml \
   --service bkn-backend vega-backend
 ```
@@ -93,11 +93,11 @@ python data-migrator.py lint \
 - `init.sql`：`USE` 语句存在性、建表语法、表名/索引名命名规范、主键存在性
 - 升级脚本：仅允许合法的 DDL / DML 语句类型
 
-### check — 执行校验（需要测试 DB）
+### verify — 执行校验（需要测试 DB）
 
 ```bash
 CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml \
-  python data-migrator.py check \
+  python data-migrator.py verify \
   --config config.yaml \
   --service bkn-backend vega-backend
 ```
@@ -158,8 +158,8 @@ export CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml
 
 | 环境变量 | 用于子命令 | 说明 |
 |----------|-----------|------|
-| `MY_PAT` | `collect` | GitHub PAT，拉取私有仓库时使用 |
-| `CHECK_RDS_CONFIG` | `check` | 测试 DB 连接配置文件路径 |
+| `MY_PAT` | `fetch` | GitHub PAT，拉取私有仓库时使用 |
+| `CHECK_RDS_CONFIG` | `verify` | 测试 DB 连接配置文件路径 |
 
 ---
 

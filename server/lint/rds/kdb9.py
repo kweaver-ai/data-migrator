@@ -5,7 +5,7 @@ from logging import Logger
 
 from server.lint.rds.base import LintRDS
 from server.db.dialect._parser.kdb9 import KDB9Parser
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 from server.utils.table_define import Database, Table, Index, PrimaryIndex, UniqueIndex, Column
 from server.utils.token import next_token, next_tokens
 

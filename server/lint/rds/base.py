@@ -4,7 +4,7 @@
 from abc import ABC, abstractmethod
 from logging import Logger
 
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 
 
 class LintRDS(ABC):

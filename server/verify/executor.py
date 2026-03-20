@@ -11,10 +11,10 @@ import yaml
 import sqlparse
 
 from server.config.models import AppConfig
-from server.check.check_config import CheckConfig
-from server.check.rds.mariadb import CheckMariaDB
-from server.check.rds.dm8 import CheckDM8
-from server.check.rds.kdb9 import CheckKDB9
+from server.verify.check_config import CheckConfig
+from server.verify.rds.mariadb import CheckMariaDB
+from server.verify.rds.dm8 import CheckDM8
+from server.verify.rds.kdb9 import CheckKDB9
 from server.db.dialect.base import RDSDialect
 from server.utils.version import VersionUtil
 

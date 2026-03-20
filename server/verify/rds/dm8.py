@@ -3,7 +3,7 @@
 """DM8 校验实现 — 继承 DM8Dialect (DB) + LintDM8 (静态校验)"""
 from logging import Logger
 
-from server.check.check_config import CheckConfig
+from server.verify.check_config import CheckConfig
 from server.db.dialect.dm8 import DM8Dialect
 from server.lint.rds.dm8 import LintDM8
 
