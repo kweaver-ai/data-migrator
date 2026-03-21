@@ -17,13 +17,11 @@ class RDSDialect(ABC):
     """
     统一方言基类。
     conn_config: {host, port, user, password, DB_TYPE} — 与 rdsdriver.connect 的 kwargs 一致。
-    system_id:   migrate 场景下的租户前缀，注入到 USE/SET SCHEMA 语句的 db_name 前。
     """
 
-    def __init__(self, conn_config: dict, logger: Logger, system_id: str = ""):
+    def __init__(self, conn_config: dict, logger: Logger):
         self.conn_config = conn_config
         self.logger = logger
-        self.system_id = system_id
         self.DB_TYPE = conn_config.get("DB_TYPE", "")
 
     # ── SQL 模板常量（子类覆盖）──────────────────────────────────────────────
@@ -105,16 +103,12 @@ class RDSDialect(ABC):
             return self.get_real_name(qualified_name.split(".")[-1])
         return self.get_real_name(qualified_name)
 
-    def _prefixed_db(self, db_name: str) -> str:
-        """为 db_name 加上 system_id 前缀（migrate 多租户）"""
-        return self.system_id + db_name if self.system_id else db_name
-
     # ── 幂等 SQL 执行（run_sql）──────────────────────────────────────────────
 
     def run_sql(self, sql_list: list):
         """
         幂等执行 SQL 列表。
-        - USE/SET SCHEMA：加 system_id 前缀后执行，跟踪 current_db
+        - USE/SET SCHEMA： 切换数据库
         - CREATE TABLE/VIEW/INDEX：先查是否已存在，已存在则跳过
         - DROP TABLE/VIEW/INDEX：先查是否存在，不存在则跳过
         - ALTER / RENAME：调用子类可 override 的 _run_sql_alter / _run_sql_rename
@@ -132,8 +126,7 @@ class RDSDialect(ABC):
 
                         if token == set_db_keyword:
                             db = self.parse_sql_use_db(sql)
-                            current_db = self._prefixed_db(db.DBName)
-                            exec_sql = self.SET_DATABASE_SQL.format(db_name=current_db)
+                            exec_sql = self.SET_DATABASE_SQL.format(db_name=db.DBName)
                             cursor.execute(exec_sql)
 
                         elif token == "CREATE":
@@ -472,6 +465,26 @@ class RDSDialect(ABC):
                         cursor.execute(self.CREATE_DATABASE_SQL.format(db_name=db_name))
         except Exception as e:
             raise Exception(f"reset_schema: {db_names} 失败: {e}") from e
+
+    def db_exists(self, db_name: str) -> bool:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.QUERY_DATABASES_SQL)
+                    names = [row[0].upper() for row in cursor.fetchall()]
+                    return db_name.upper() in names
+        except Exception as e:
+            raise Exception(f"db_exists: {db_name} 检查失败: {e}") from e
+
+    def table_exists(self, db_name: str, table_name: str) -> bool:
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(self.QUERY_TABLE_SQL.format(
+                        db_name=db_name, table_name=table_name))
+                    return len(cursor.fetchall()) > 0
+        except Exception as e:
+            raise Exception(f"table_exists: {db_name}.{table_name} 检查失败: {e}") from e
 
     def list_tables_by_db(self, db_name: str) -> list:
         try:

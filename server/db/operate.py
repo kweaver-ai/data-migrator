@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """数据库操作 - CRUD + DDL 执行"""
-import re
 from logging import Logger
 
 from server.config.models import RDSConfig
@@ -26,9 +25,8 @@ class OperateDB:
         execute_sql = ""
         try:
             cursor = self.conn.cursor()
-            for index, sql_item in enumerate(sql_list):
+            for index, execute_sql in enumerate(sql_list):
                 self.logger.info(f"Execute the {index}th statement")
-                execute_sql = self._transform_sql(sql_item)
                 self.logger.info(f"{execute_sql}")
                 cursor.execute(execute_sql)
             self.conn.commit()
@@ -38,28 +36,6 @@ class OperateDB:
             raise ex
         finally:
             cursor.close()
-
-    def _transform_sql(self, sql: str) -> str:
-        """多租户 system_id 前缀处理"""
-        system_id = self.rds_config.system_id
-        if not system_id:
-            return sql
-
-        patterns = [
-            (r"^USE\s+(.*);$", "USE"),
-            (r"^SET SCHEMA\s+(.*);$", "SET SCHEMA"),
-        ]
-        for pattern, command in patterns:
-            regex = re.compile(pattern, re.IGNORECASE)
-            match = regex.search(sql)
-            if match:
-                dbname = match.group(1)
-                if command == "USE":
-                    dbname = dbname.replace(" ", "").replace("`", "")
-                    return f"{command} `{system_id}{dbname}`;"
-                dbname = dbname.replace(" ", "").replace('"', "")
-                return f'{command} "{system_id}{dbname}";'
-        return sql
 
     def fetch_one(self, sql: str, *args):
         """执行查询，返回一条记录"""

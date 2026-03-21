@@ -27,32 +27,6 @@ from server.migrate.json_executor import JsonExecutor
 from server.utils.sql import parse_sql_file
 
 
-# deploy 管控表 DDL
-CREATE_TASK_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS {deploy_db}.schema_migration_task (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    service_name VARCHAR(255) NOT NULL,
-    installed_version VARCHAR(64) NOT NULL DEFAULT '',
-    target_version VARCHAR(64) NOT NULL DEFAULT '',
-    script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-    create_time DATETIME NOT NULL,
-    update_time DATETIME NOT NULL
-)
-"""
-
-CREATE_HISTORY_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS {deploy_db}.schema_migration_history (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    service_name VARCHAR(255) NOT NULL,
-    version VARCHAR(64) NOT NULL DEFAULT '',
-    script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    checksum VARCHAR(128) NOT NULL DEFAULT '',
-    status VARCHAR(32) NOT NULL DEFAULT 'success',
-    create_time DATETIME NOT NULL
-)
-"""
-
 
 class MigrationExecutor:
     def __init__(self, app_config: AppConfig, logger: Logger):
@@ -88,7 +62,14 @@ class MigrationExecutor:
         self.logger.info("========== 数据迁移完成 ==========")
 
     def _ensure_deploy_tables(self):
-        """确保 deploy 库和管控表存在"""
+        """确保 deploy 库和管控表存在（internal: 自动创建；external: 仅校验）"""
+        if self.app_config.rds.source_type == "external":
+            self._verify_deploy_tables()
+        else:
+            self._create_deploy_tables()
+
+    def _create_deploy_tables(self):
+        """internal 模式：自动创建 deploy 库和管控表"""
         self.logger.info(f"确保 deploy 库存在: {self.deploy_db}")
         create_db_sql = self.dialect.CREATE_DATABASE_SQL.format(db_name=self.deploy_db)
         try:
@@ -96,11 +77,24 @@ class MigrationExecutor:
         except Exception:
             self.logger.info(f"deploy 库可能已存在: {self.deploy_db}")
 
-        task_ddl = CREATE_TASK_TABLE_SQL.format(deploy_db=self.deploy_db)
-        history_ddl = CREATE_HISTORY_TABLE_SQL.format(deploy_db=self.deploy_db)
+        task_ddl = TaskManager.get_create_table_sql(self.deploy_db)
+        history_ddl = HistoryManager.get_create_table_sql(self.deploy_db)
         self.operate_db.run_ddl([task_ddl])
         self.operate_db.run_ddl([history_ddl])
         self.logger.info("deploy 管控表就绪")
+
+    def _verify_deploy_tables(self):
+        """external 模式：校验 deploy 库和管控表已存在，否则报错退出"""
+        self.logger.info(f"external 模式: 校验 deploy 库存在: {self.deploy_db}")
+        if not self.dialect.db_exists(self.deploy_db):
+            raise RuntimeError(f"external 模式: deploy 库 '{self.deploy_db}' 不存在，请手动创建")
+
+        for table_name in [TaskManager.TABLE, HistoryManager.TABLE]:
+            if not self.dialect.table_exists(self.deploy_db, table_name):
+                raise RuntimeError(
+                    f"external 模式: 管控表 '{self.deploy_db}.{table_name}' 不存在，请手动创建"
+                )
+        self.logger.info("deploy 管控表校验通过")
 
     def _handle_renamed_services(self):
         """处理服务改名"""
@@ -118,14 +112,14 @@ class MigrationExecutor:
             self.logger.warning(f"脚本目录不存在: {script_dir}")
             return []
 
-        # 如果有 services 配置，按配置过滤；否则扫描目录
-        if self.app_config.services:
-            return list(self.app_config.services.keys())
-
-        svc_filter = self.app_config.service_filter
-        return [d for d in os.listdir(script_dir)
-                if os.path.isdir(os.path.join(script_dir, d))
-                and (not svc_filter or d in svc_filter)]
+        result = []
+        for name in self.app_config.services:
+            svc_path = os.path.join(script_dir, name)
+            if not os.path.isdir(svc_path):
+                self.logger.warning(f"服务目录不存在，跳过: {svc_path}")
+                continue
+            result.append(name)
+        return result
 
     def _migrate_service(self, service_name: str):
         """迁移单个服务"""
@@ -197,7 +191,7 @@ class MigrationExecutor:
 
     def _upgrade_service(self, service_name: str, task_record: dict):
         """升级路径"""
-        installed_version = task_record["installed_version"]
+        installed_version = task_record["f_installed_version"]
         self.logger.info(f"[{service_name}] 升级, installed_version={installed_version}")
 
         upgrade_files, max_version, has_scripts = self.script_selector.select_upgrade_scripts(

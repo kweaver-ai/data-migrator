@@ -24,7 +24,7 @@ _DIALECT_MAP = {
 
 
 def create_dialect(rds_config: RDSConfig, logger: Logger) -> RDSDialect:
-    """migrate 用：连接生产库，注入 system_id 租户前缀"""
+    """migrate 用：连接生产库"""
     db_type = rds_config.type.lower()
     dialect_cls = _DIALECT_MAP.get(db_type)
     if dialect_cls is None:
@@ -36,11 +36,11 @@ def create_dialect(rds_config: RDSConfig, logger: Logger) -> RDSDialect:
         "password": rds_config.password,
         "DB_TYPE": rds_config.type.upper(),
     }
-    return dialect_cls(conn_config, logger, system_id=rds_config.system_id)
+    return dialect_cls(conn_config, logger)
 
 
 def create_check_dialect(db_type: str, conn_config: dict, logger: Logger) -> RDSDialect:
-    """check 用：连接测试库，无 system_id 前缀"""
+    """check 用：连接测试库"""
     dialect_cls = _DIALECT_MAP.get(db_type.lower())
     if dialect_cls is None:
         raise Exception(f"不支持的数据库类型: {db_type}")

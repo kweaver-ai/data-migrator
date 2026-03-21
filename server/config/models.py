@@ -5,6 +5,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 
+VALID_SOURCE_TYPES = {"internal", "external"}
+
+
 @dataclass
 class RDSConfig:
     """数据库连接配置"""
@@ -13,10 +16,16 @@ class RDSConfig:
     user: str
     password: str
     type: str  # mariadb, mysql, tidb, dm8, kdb9, goldendb
-    system_id: str = ""
+    source_type: str  # internal, external
+
+    def __post_init__(self):
+        if self.source_type not in VALID_SOURCE_TYPES:
+            raise ValueError(
+                f"source_type 非法值: '{self.source_type}'，只允许: {sorted(VALID_SOURCE_TYPES)}"
+            )
 
     def get_deploy_db_name(self) -> str:
-        return f"{self.system_id}deploy"
+        return "deploy"
 
 
 @dataclass

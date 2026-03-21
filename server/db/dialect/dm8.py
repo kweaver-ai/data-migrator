@@ -9,8 +9,8 @@ from server.utils.token import next_token, next_tokens
 
 
 class DM8Dialect(DM8Parser, RDSDialect):
-    def __init__(self, conn_config: dict, logger: Logger, system_id: str = ""):
-        RDSDialect.__init__(self, conn_config, logger, system_id)
+    def __init__(self, conn_config: dict, logger: Logger):
+        RDSDialect.__init__(self, conn_config, logger)
 
         self.SET_DATABASE_SQL = "SET SCHEMA {db_name}"
         self.QUERY_DATABASES_SQL = "select OWNER from dba_objects where object_type='SCH'"

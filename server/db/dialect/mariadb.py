@@ -9,8 +9,8 @@ from server.utils.token import next_token, next_tokens
 
 
 class MariaDBDialect(MariaDBParser, RDSDialect):
-    def __init__(self, conn_config: dict, logger: Logger, system_id: str = ""):
-        RDSDialect.__init__(self, conn_config, logger, system_id)
+    def __init__(self, conn_config: dict, logger: Logger):
+        RDSDialect.__init__(self, conn_config, logger)
 
         self.SET_DATABASE_SQL = "USE {db_name}"
         self.QUERY_DATABASES_SQL = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA"

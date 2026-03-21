@@ -19,7 +19,7 @@ def _load_rds_config(cfg: dict) -> RDSConfig:
         user=rds_data.get("user", ""),
         password=rds_data.get("password", ""),
         type=rds_data.get("type", "mariadb"),
-        system_id=rds_data.get("system_id", ""),
+        source_type=rds_data.get("source_type", "internal"),
     )
 
 
@@ -59,7 +59,7 @@ def _set_rds_env(rds_config: RDSConfig):
     os.environ["DB_USER"] = os.environ.get("DB_USER") or rds_config.user
     os.environ["DB_PASSWD"] = os.environ.get("DB_PASSWD") or rds_config.password
     os.environ["DB_TYPE"] = rds_config.type
-    os.environ["SYSTEM_ID"] = os.environ.get("SYSTEM_ID") or rds_config.system_id
+    os.environ["DB_SOURCE_TYPE"] = rds_config.source_type
 
 
 def load_config(config_path: str, service_filter: Optional[List[str]], logger: Logger) -> AppConfig:

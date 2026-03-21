@@ -12,7 +12,7 @@ def make_check_config(
     allow_none_primary_key: bool = False,
     allow_foreign_key: bool = False,
 ) -> CheckConfig:
-    rds = RDSConfig(host="", port=3306, user="", password="", type="mariadb")
+    rds = RDSConfig(host="", port=3306, user="", password="", type="mariadb", source_type="internal")
     rules = CheckRulesConfig(
         allow_none_primary_key=allow_none_primary_key,
         allow_foreign_key=allow_foreign_key,

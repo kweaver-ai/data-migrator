@@ -11,7 +11,7 @@ from server.migrate.script_selector import ScriptSelector
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 def make_selector(tmp_path, db_type="mariadb") -> ScriptSelector:
-    rds = RDSConfig(host="", port=3306, user="", password="", type=db_type)
+    rds = RDSConfig(host="", port=3306, user="", password="", type=db_type, source_type="internal")
     cfg = AppConfig(rds=rds, repo_path=str(tmp_path))
     return ScriptSelector(cfg, logging.getLogger("test"))
 
