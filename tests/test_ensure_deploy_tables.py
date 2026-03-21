@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """executor._ensure_deploy_tables 的 internal/external 分支测试"""
 import logging
 from unittest.mock import MagicMock, patch, call

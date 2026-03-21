@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """KDB9 (人大金仓) 方言 - DB 连接 + SQL 模板 + 幂等执行"""
 from logging import Logger
 

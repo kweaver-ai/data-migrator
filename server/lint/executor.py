@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """lint 子命令入口 — 纯静态目录结构与 SQL 语法校验，无 DB 依赖"""
 from __future__ import annotations
 

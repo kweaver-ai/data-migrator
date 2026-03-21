@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """SQL 解析工具 - 基于 sqlparse 的 split + 注释过滤"""
 from logging import Logger
 from typing import List

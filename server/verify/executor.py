@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """check 子命令入口 — 连接测试 DB，执行 SQL 校验 + schema 对比"""
 import json
 import os

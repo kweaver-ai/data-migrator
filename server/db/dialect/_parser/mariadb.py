@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """MariaDB 纯字符串解析器 — 无 DB 依赖"""
 from server.db.dialect._parser.base import RDSParser
 from server.utils.table_define import Database, Column

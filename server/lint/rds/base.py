@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """Lint 抽象基类 — 纯静态 SQL 校验，无 DB 依赖"""
 from abc import ABC, abstractmethod
 from logging import Logger

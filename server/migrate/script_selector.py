@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """脚本选择器 - 版本扫描、init.sql 查找、脚本排序
 
 新目录结构：脚本直接放在 <version>/ 下，无 pre/ 子目录。

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """
 MariaDB parser 层单元测试 — 覆盖 RDSParser 基类 + MariaDBParser。
 所有测试纯字符串操作，无 DB 依赖。

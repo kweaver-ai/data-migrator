@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """纯字符串解析公共基类 — 无 DB 依赖，无 rdsdriver 引用"""
 from server.utils.token import next_token
 

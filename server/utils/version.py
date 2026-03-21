@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """版本号工具 - 合并 tools/utils/version.py + server-old/src/utils/util.py"""
 import re
 from typing import List, Optional

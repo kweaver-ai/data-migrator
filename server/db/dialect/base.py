@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """数据库方言抽象基类 - 统一 check 和 migrate 的 SQL 执行逻辑"""
 import os
 from abc import ABC, abstractmethod

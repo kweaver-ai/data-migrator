@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright The kweaver.ai Authors.
+#
+# Licensed under the Apache License, Version 2.0.
+# See the LICENSE file in the project root for details.
 """JSON 升级文件执行器 - 委托给 RDSDialect 的幂等操作方法"""
 import json
 from logging import Logger
