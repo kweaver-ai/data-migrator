@@ -41,19 +41,16 @@ class ScriptSelector:
         versions = self.get_all_versions(service_name)
         return get_max_version(versions)
 
-    def find_init_sql(self, service_name: str) -> Optional[str]:
-        """
-        逆序查找 init.sql：从最大版本开始向下找，返回第一个含 init.sql 的版本路径。
-        """
-        versions = sort_versions(self.get_all_versions(service_name))
+    def find_init_sql(self, service_name: str) -> Tuple[Optional[str], Optional[str]]:
+        """取最大版本下的 init.sql（lint 保证每个版本均存在），返回 (path, version)"""
+        max_version = self.get_max_version(service_name)
+        if not max_version:
+            return None, None
         db_type_path = self.get_service_db_type_path(service_name)
-
-        for version in reversed(versions):
-            init_path = os.path.join(db_type_path, version, "init.sql")
-            if os.path.isfile(init_path):
-                self.logger.info(f"[{service_name}] 找到 init.sql: {init_path}")
-                return init_path
-        return None
+        init_path = os.path.join(db_type_path, max_version, "init.sql")
+        if not os.path.isfile(init_path):
+            return None, None
+        return init_path, max_version
 
     def select_upgrade_scripts(self, service_name: str,
                                installed_version: Optional[str]) -> Tuple[List[List[str]], str, bool]:

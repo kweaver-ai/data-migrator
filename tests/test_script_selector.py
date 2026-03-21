@@ -60,30 +60,31 @@ class TestFindInitSql:
         mk_version(tmp_path, "svc", "mariadb", "1.0.0", has_init=True)
         mk_version(tmp_path, "svc", "mariadb", "1.1.0", has_init=True)
         sel = make_selector(tmp_path)
-        path = sel.find_init_sql("svc")
+        path, version = sel.find_init_sql("svc")
         assert path.endswith(os.path.join("1.1.0", "init.sql"))
+        assert version == "1.1.0"
 
-    def test_falls_back_to_older_version(self, tmp_path):
-        # 1.0.0 有 init.sql，1.1.0 没有
+    def test_returns_none_when_max_version_has_no_init(self, tmp_path):
+        # 只看最大版本，最大版本无 init.sql 则返回 (None, None)
         mk_version(tmp_path, "svc", "mariadb", "1.0.0", has_init=True)
         mk_version(tmp_path, "svc", "mariadb", "1.1.0")
         sel = make_selector(tmp_path)
-        path = sel.find_init_sql("svc")
-        assert path.endswith(os.path.join("1.0.0", "init.sql"))
+        assert sel.find_init_sql("svc") == (None, None)
 
     def test_no_init_sql_anywhere_returns_none(self, tmp_path):
         mk_version(tmp_path, "svc", "mariadb", "1.0.0")
         sel = make_selector(tmp_path)
-        assert sel.find_init_sql("svc") is None
+        assert sel.find_init_sql("svc") == (None, None)
 
     def test_no_versions_returns_none(self, tmp_path):
         sel = make_selector(tmp_path)
-        assert sel.find_init_sql("svc") is None
+        assert sel.find_init_sql("svc") == (None, None)
 
     def test_single_version_with_init(self, tmp_path):
         mk_version(tmp_path, "svc", "mariadb", "0.4.0", has_init=True)
         sel = make_selector(tmp_path)
-        path = sel.find_init_sql("svc")
+        path, version = sel.find_init_sql("svc")
+        assert version == "0.4.0"
         assert "0.4.0" in path
 
 

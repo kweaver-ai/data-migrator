@@ -7,6 +7,7 @@ from logging import Logger
 from server.db.operate import OperateDB
 from server.config.models import RDSConfig
 from server.utils.checksum import sha256_file
+from server.migrate.task_manager import TaskStatus
 
 class HistoryManager:
     TABLE = "t_schema_migration_history"
@@ -30,7 +31,7 @@ class HistoryManager:
 )"""
 
     def record(self, service_name: str, version: str, script_file_name: str,
-               script_path: str, status: str = "success"):
+               script_path: str, status: TaskStatus):
         """记录一条迁移历史"""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         checksum = sha256_file(script_path) if script_path else ""

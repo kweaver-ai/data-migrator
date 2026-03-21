@@ -117,8 +117,9 @@ class LintExecutor:
             else:
                 raise Exception(f"无效的文件: {filepath}")
 
-        if init_file:
-            self._check_init_file(init_file, lint_rds)
+        if init_file is None:
+            raise Exception(f"缺少 init.sql: {version_dir}")
+        self._check_init_file(init_file, lint_rds)
 
         for seq in sorted(update_files):
             self._check_update_file(update_files[seq], lint_rds)

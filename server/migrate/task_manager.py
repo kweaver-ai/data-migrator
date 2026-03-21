@@ -2,10 +2,19 @@
 # -*- coding: utf-8 -*-
 """t_schema_migration_task 管理 - INSERT/UPDATE/SELECT"""
 import datetime
+from enum import Enum
 from logging import Logger
 
 from server.db.operate import OperateDB
 from server.config.models import RDSConfig
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED  = "failed"
+
 
 class TaskManager:
     TABLE = "t_schema_migration_task"
@@ -38,7 +47,7 @@ class TaskManager:
         return self.db.fetch_one(sql, service_name)
 
     def insert_task(self, service_name: str, installed_version: str,
-                    target_version: str, script_file_name: str, status: str = "running"):
+                    target_version: str, script_file_name: str, status: TaskStatus):
         """插入新任务记录"""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.db.insert(f"{self.deploy_db}.{self.TABLE}", {
@@ -51,7 +60,7 @@ class TaskManager:
             "f_update_time": now,
         })
 
-    def update_status(self, service_name: str, status: str,
+    def update_status(self, service_name: str, status: TaskStatus,
                       script_file_name: str = None,
                       target_version: str = None,
                       installed_version: str = None):

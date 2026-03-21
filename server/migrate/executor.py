@@ -20,7 +20,7 @@ from logging import Logger
 from server.config.models import AppConfig
 from server.db.operate import OperateDB
 from server.db.dialect.factory import create_dialect
-from server.migrate.task_manager import TaskManager
+from server.migrate.task_manager import TaskManager, TaskStatus
 from server.migrate.history_manager import HistoryManager
 from server.migrate.script_selector import ScriptSelector
 from server.migrate.json_executor import JsonExecutor
@@ -135,59 +135,45 @@ class MigrationExecutor:
             self._install_service(service_name)
 
     def _install_service(self, service_name: str):
-        """首次安装：执行 init.sql + 后续增量"""
+        """首次安装：执行最大版本的 init.sql"""
         self.logger.info(f"[{service_name}] 首次安装")
 
-        # 查找 init.sql
-        init_path = self.script_selector.find_init_sql(service_name)
+        # 查找最大版本的 init.sql
+        init_path, init_version = self.script_selector.find_init_sql(service_name)
         if not init_path:
             self.logger.warning(f"[{service_name}] 未找到 init.sql，跳过")
             return
+
+        # 注册任务（running）
+        self.task_mgr.insert_task(
+            service_name=service_name,
+            installed_version="",
+            target_version=init_version,
+            script_file_name=f"{init_version}/init.sql",
+            status=TaskStatus.RUNNING,
+        )
 
         # 执行 init.sql
         sql_list = parse_sql_file(init_path, self.logger)
         self._execute_sql_list_with_idempotency(sql_list)
         self.logger.info(f"[{service_name}] init.sql 执行完成")
 
-        # 确定 init.sql 所在版本
-        parts = init_path.split(os.sep)
-        # 路径格式: .../service/db_type/version/init.sql
-        init_version = parts[-2]
-        max_version = self.script_selector.get_max_version(service_name) or init_version
-
-        # 注册任务
-        init_filename = os.path.basename(init_path)
-        self.task_mgr.insert_task(
-            service_name=service_name,
-            installed_version=init_version,
-            target_version=max_version,
-            script_file_name=init_filename,
-            status="success",
-        )
-
         # 记录历史
         self.history_mgr.record(
             service_name=service_name,
             version=init_version,
-            script_file_name=init_filename,
+            script_file_name=f"{init_version}/init.sql",
             script_path=init_path,
         )
-
-        # 执行 init_version 之后的增量脚本
-        upgrade_files, _, has_scripts = self.script_selector.select_upgrade_scripts(
-            service_name, init_version
-        )
-        if has_scripts:
-            self._execute_upgrade_files(service_name, upgrade_files, max_version, init_version)
 
         # 最终状态
         self.task_mgr.update_status(
             service_name=service_name,
-            status="success",
-            installed_version=max_version,
-            target_version=max_version,
+            status=TaskStatus.SUCCESS,
+            installed_version=init_version,
+            target_version=init_version,
         )
-        self.logger.info(f"[{service_name}] 安装完成, version={max_version}")
+        self.logger.info(f"[{service_name}] 安装完成, version={init_version}")
 
     def _upgrade_service(self, service_name: str, task_record: dict):
         """升级路径"""
@@ -205,7 +191,7 @@ class MigrationExecutor:
         # 更新状态为 running
         self.task_mgr.update_status(
             service_name=service_name,
-            status="running",
+            status=TaskStatus.RUNNING,
             target_version=max_version,
         )
 
@@ -214,7 +200,7 @@ class MigrationExecutor:
         # 成功
         self.task_mgr.update_status(
             service_name=service_name,
-            status="success",
+            status=TaskStatus.SUCCESS,
             installed_version=max_version,
             target_version=max_version,
         )
@@ -236,7 +222,7 @@ class MigrationExecutor:
                 # 更新当前脚本到 task
                 self.task_mgr.update_status(
                     service_name=service_name,
-                    status="running",
+                    status=TaskStatus.RUNNING,
                     script_file_name=relative_name,
                     target_version=target_version,
                 )
@@ -247,7 +233,7 @@ class MigrationExecutor:
                     # 失败：记录状态并中断
                     self.task_mgr.update_status(
                         service_name=service_name,
-                        status="failed",
+                        status=TaskStatus.FAILED,
                         script_file_name=relative_name,
                     )
                     self.history_mgr.record(
@@ -255,7 +241,7 @@ class MigrationExecutor:
                         version=version,
                         script_file_name=relative_name,
                         script_path=script_path,
-                        status="failed",
+                        status=TaskStatus.FAILED,
                     )
                     raise Exception(f"执行脚本失败: {relative_name}, error: {ex}")
 
