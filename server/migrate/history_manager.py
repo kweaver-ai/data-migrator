@@ -4,13 +4,12 @@
 #
 # Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the project root for details.
-"""t_schema_migration_history 管理 - 记录 + checksum 比对"""
+"""t_schema_migration_history 管理 - 历史记录写入"""
 import datetime
 from logging import Logger
 
 from server.db.operate import OperateDB
 from server.config.models import RDSConfig
-from server.utils.checksum import sha256_file
 from server.migrate.task_manager import TaskStatus
 
 class HistoryManager:
@@ -29,52 +28,18 @@ class HistoryManager:
     f_service_name VARCHAR(255) NOT NULL,
     f_version VARCHAR(64) NOT NULL DEFAULT '',
     f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    f_checksum VARCHAR(128) NOT NULL DEFAULT '',
     f_status VARCHAR(32) NOT NULL DEFAULT 'success',
     f_create_time DATETIME NOT NULL
 )"""
 
     def record(self, service_name: str, version: str, script_file_name: str,
-               script_path: str, status: TaskStatus):
+               status: TaskStatus):
         """记录一条迁移历史"""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        checksum = sha256_file(script_path) if script_path else ""
         self.db.insert(f"{self.deploy_db}.{self.TABLE}", {
             "f_service_name": service_name,
             "f_version": version,
             "f_script_file_name": script_file_name,
-            "f_checksum": checksum,
             "f_status": status,
             "f_create_time": now,
         })
-
-    def get_last_record(self, service_name: str) -> dict:
-        """查询服务最后一条历史记录"""
-        sql = (
-            f"SELECT * FROM {self.deploy_db}.{self.TABLE} "
-            f"WHERE f_service_name = %s ORDER BY f_id DESC LIMIT 1"
-        )
-        return self.db.fetch_one(sql, service_name)
-
-    def check_checksum(self, service_name: str, version: str,
-                       script_file_name: str, script_path: str) -> bool:
-        """比对 checksum，判断脚本是否被篡改"""
-        sql = (
-            f"SELECT f_checksum FROM {self.deploy_db}.{self.TABLE} "
-            f"WHERE f_service_name = %s AND f_version = %s AND f_script_file_name = %s "
-            f"ORDER BY f_id DESC LIMIT 1"
-        )
-        row = self.db.fetch_one(sql, service_name, version, script_file_name)
-        if row is None:
-            return True  # 无历史记录，无需比对
-        stored_checksum = row.get("f_checksum", "")
-        if not stored_checksum:
-            return True
-        current_checksum = sha256_file(script_path)
-        if stored_checksum != current_checksum:
-            self.logger.warning(
-                f"Checksum 不匹配: {service_name}/{version}/{script_file_name}, "
-                f"stored={stored_checksum}, current={current_checksum}"
-            )
-            return False
-        return True

@@ -158,7 +158,6 @@ class MigrationExecutor:
                 service_name=service_name,
                 version=init_version,
                 script_file_name=relative_name,
-                script_path=init_path,
                 status=TaskStatus.FAILED,
             )
             raise Exception(f"[{service_name}] init.sql 执行失败: {ex}")
@@ -173,7 +172,6 @@ class MigrationExecutor:
             service_name=service_name,
             version=init_version,
             script_file_name=relative_name,
-            script_path=init_path,
             status=TaskStatus.SUCCESS,
         )
         self.logger.info(f"[{service_name}] 安装完成, version={init_version}")
@@ -226,7 +224,6 @@ class MigrationExecutor:
                         service_name=service_name,
                         version=version,
                         script_file_name=relative_name,
-                        script_path=script_path,
                         status=TaskStatus.FAILED,
                     )
                     raise Exception(f"执行脚本失败: {relative_name}, error: {ex}")
@@ -237,7 +234,6 @@ class MigrationExecutor:
                     service_name=service_name,
                     version=version,
                     script_file_name=relative_name,
-                    script_path=script_path,
                     status=TaskStatus.SUCCESS,
                 )
                 self.logger.info(f"[{service_name}] 成功: {relative_name}")
@@ -261,14 +257,18 @@ class MigrationExecutor:
         elif ext == ".py":
             custom_env = os.environ.copy()
             custom_env["PYTHONUNBUFFERED"] = "1"
-            result = subprocess.run(
-                [sys.executable, script_path],
-                env=custom_env,
-                capture_output=True,
-                text=True,
-                check=True,
-                encoding="utf-8",
-            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, script_path],
+                    env=custom_env,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    encoding="utf-8",
+                )
+            except subprocess.CalledProcessError as e:
+                stderr_output = e.stderr.strip() if e.stderr else ""
+                raise Exception(f"[{script_path}] 退出码 {e.returncode}\n{stderr_output}")
             for line in result.stdout.splitlines():
                 self.logger.info(line.strip())
             for line in result.stderr.splitlines():

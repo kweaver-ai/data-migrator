@@ -263,7 +263,7 @@ class CheckExecutor:
             custom_env["DB_USER"] = check_rds.conn_config["user"]
             custom_env["DB_PASSWD"] = check_rds.conn_config["password"]
 
-            subprocess.run(
+            result = subprocess.run(
                 [sys.executable, filepath],
                 env=custom_env,
                 capture_output=True,
@@ -271,7 +271,7 @@ class CheckExecutor:
                 check=True,
                 encoding="utf-8",
             )
-            self.logger.info(f"成功: {filepath}")
+            self.logger.info(f"运行 {filepath} 成功, result: {result}")
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Python 文件执行失败: {filepath}, 错误: {e.stderr}")
             raise Exception(f"运行 Python 文件失败: {filepath}")
