@@ -52,7 +52,7 @@ fetch  →  lint  →  verify  →  (merge)  →  migrate
 - 升级脚本编号 `01` ~ `99`，按编号顺序执行
 - 支持 `.sql` 和 `.py` 两种格式（`.json` 支持但不建议继续使用）
 
-**`init.sql` 定位：** 是该版本的完整数据库快照，而非增量脚本。包含 `init.sql` 的版本目录，其编号增量脚本不会被执行——`init.sql` 已是该版本的终态。
+**`init.sql` 定位：** 是该版本的完整数据库快照，而非增量脚本。每个版本目录必须包含 `init.sql`（lint 强制校验）。首次安装时，引擎取**最大版本**的 `init.sql` 执行；升级时跳过所有 `init.sql`，仅执行编号增量脚本。
 
 **Python 脚本：** 以子进程方式执行，通过环境变量注入数据库连接信息（`DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWD`、`DB_TYPE`）。
 
@@ -209,34 +209,49 @@ CHECK_RDS_CONFIG=check_rds_config.yaml \
 
 #### 脚本筛选规则
 
-**首次安装：**
-1. 从 `TARGET_VERSION` 逆序回溯，找到最近包含 `init.sql` 的版本目录（记为 `V_base`）
-2. 执行 `V_base/init.sql`（完整快照）
-3. 按序执行 `V_base` **之后**所有版本的编号增量脚本（`V_base` 自身的增量脚本不执行）
+**首次安装（task 表无记录）：**
+1. 取最大版本目录下的 `init.sql`（每个版本均存在，lint 保证）
+2. 执行 `<max_version>/init.sql`（完整快照）
+3. 成功后写入 task 记录（`f_installed_version = max_version`，`f_script_file_name = <max_version>/init.sql`）
+4. 失败则不写 task，下次 rerun 重新从 init.sql 开始
 
-**版本升级：**
-1. 跳过所有版本的 `init.sql`
-2. 从当前记录版本之后开始，按序执行各版本的编号增量脚本
+**版本升级（task 表已有记录）：**
+1. 读取 `f_installed_version` 作为当前版本
+2. 收集所有 `> installed_version` 的版本目录，跳过 `init.sql`，按编号排序增量脚本
+3. 每个脚本执行成功后更新 `f_script_file_name`（断点续跑锚点）
+4. 一个版本内所有脚本完成后更新 `f_installed_version`
 
-#### 核心状态机
+#### 断点续跑
+
+rerun 时通过 `f_script_file_name` 定位断点：
+- 格式为 `<version>/<filename>`，如 `1.1.0/02-add-index.sql`
+- 同版本内：跳过序号 `<= last_script_seq` 的脚本
+- 跨版本：`f_installed_version` 之前的版本整体跳过，`f_installed_version` 对应版本按脚本锚点续跑
+
+#### 核心执行流程
 
 ```
 [节点 0] Helm Hook 拉起 Pod，通过 CLI args 接收全部配置
     │
     ▼
-[节点 1] 任务注册
-    │  INSERT/UPDATE task 记录，status='running'
+[节点 1] 确保管控表存在
+    │  internal 模式：自动创建 deploy 库和管控表
+    │  external 模式：仅校验库和表是否存在，不存在则报错退出
     ▼
-[节点 2] 校验历史与断点计算
-    │  扫描版本目录，查询执行流水表
-    │  Checksum 不一致 → 警告日志（不阻断）
+[节点 2] 遍历服务（严格按 app_config.services 列表，目录不存在则警告跳过）
+    │
     ▼
-[节点 3] 循环执行脚本
+[节点 3] 路由判断
+    │  task 无记录 → 首次安装路径（execute init.sql）
+    │  task 有记录 → 升级路径（execute 增量脚本）
+    ▼
+[节点 4] 逐脚本执行
     │  .sql → sqlparse 解析 + 幂等预检 + 执行
-    │  .py  → 传入连接池动态执行
-    │  失败 → 熔断，status='fail', exit 1
+    │  .py  → 子进程执行，环境变量注入 DB 连接信息
+    │  失败 → 写 history（status=failed），raise 后 exit 1
+    │  成功 → 写 history（status=success），更新 task 断点
     ▼
-[节点 4] 全部成功 → status='success', exit 0
+[节点 5] 全部版本完成 → exit 0
 ```
 
 #### SQL 幂等预检
@@ -245,7 +260,7 @@ CHECK_RDS_CONFIG=check_rds_config.yaml \
 1. `sqlparse.split()` 拆分为独立语句
 2. 过滤注释和空语句
 3. 对每条语句：解析 DDL 类型 → 查询元数据判断是否已生效 → 已生效跳过，未生效执行
-4. 执行失败 → 记录异常，主任务置为 `fail`，`exit 1`
+4. 执行失败 → 记录异常，`exit 1`
 
 ### Helm 集成与统一镜像构建
 
@@ -270,32 +285,43 @@ CI/CD 将各微服务 migrations 目录与引擎代码打包为统一镜像：
 `deploy` 管控库采用"任务主表 + 历史流水表"双表设计：
 
 ```sql
-CREATE TABLE IF NOT EXISTS `schema_migration_task` (
-  `id`              BIGINT(20) NOT NULL AUTO_INCREMENT,
-  `service_name`    VARCHAR(50) NOT NULL,
-  `target_version`  VARCHAR(50) NOT NULL,
-  `current_script`  VARCHAR(255) NOT NULL DEFAULT '',
-  `status`          VARCHAR(20) NOT NULL,       -- running / success / fail
-  `error_msg`       TEXT,
-  `create_time`     DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `update_time`     DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_service_version` (`service_name`, `target_version`)
+-- 任务主表：每个服务唯一一条记录，仅记录成功态，兼做断点续跑锚点
+CREATE TABLE IF NOT EXISTS t_schema_migration_task (
+  f_id                BIGINT AUTO_INCREMENT PRIMARY KEY,
+  f_service_name      VARCHAR(255) NOT NULL,
+  f_installed_version VARCHAR(64)  NOT NULL DEFAULT '',  -- 已完成的最新版本
+  f_target_version    VARCHAR(64)  NOT NULL DEFAULT '',  -- 本次迁移的目标版本
+  f_script_file_name  VARCHAR(512) NOT NULL DEFAULT '',  -- 最后成功执行的脚本（version/filename）
+  f_create_time       DATETIME NOT NULL,
+  f_update_time       DATETIME NOT NULL,
+  UNIQUE KEY uk_service_name (f_service_name)
 );
 
-CREATE TABLE IF NOT EXISTS `schema_migration_history` (
-  `id`                BIGINT(20) NOT NULL AUTO_INCREMENT,
-  `service_name`      VARCHAR(50) NOT NULL,
-  `target_version`    VARCHAR(50) NOT NULL,
-  `script_name`       VARCHAR(255) NOT NULL,    -- 如 1.0.0/01-add-column.sql
-  `checksum`          VARCHAR(64) NOT NULL,
-  `status`            VARCHAR(20) NOT NULL,     -- success / fail
-  `execution_time_ms` INT DEFAULT 0,
-  `create_time`       DATETIME DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_service_script` (`service_name`, `script_name`)
+-- 历史流水表：每次脚本执行追加一条，success 和 failed 均记录
+CREATE TABLE IF NOT EXISTS t_schema_migration_history (
+  f_id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+  f_service_name     VARCHAR(255) NOT NULL,
+  f_version          VARCHAR(64)  NOT NULL DEFAULT '',
+  f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',   -- 如 1.0.0/01-add-column.sql
+  f_checksum         VARCHAR(128) NOT NULL DEFAULT '',
+  f_status           VARCHAR(32)  NOT NULL DEFAULT 'success',  -- success / failed
+  f_create_time      DATETIME NOT NULL
 );
 ```
+
+**设计说明：**
+- 任务主表无 `f_status` 字段，写入即代表成功；安装失败时不写记录，下次 rerun 从头重试
+- `f_script_file_name` 格式为 `<version>/<filename>`，作为版本内断点续跑的脚本锚点
+- `f_installed_version` 在每个版本所有脚本执行完成后才更新，保证跨版本升级时的断点粒度
+
+### source_type 模式说明
+
+RDS 配置中的 `source_type` 字段控制 deploy 管控库的初始化行为：
+
+| 值 | 行为 |
+|----|------|
+| `internal`（默认） | 引擎自动创建 deploy 库和管控表（`CREATE DATABASE IF NOT EXISTS` + `CREATE TABLE IF NOT EXISTS`） |
+| `external` | 引擎仅校验 deploy 库和管控表是否已存在，不存在则报错退出；适用于 DBA 统一管控建库建表的场景 |
 
 ### 存量环境基线补录
 

@@ -139,22 +139,8 @@ class TestCollectScriptsFromDir:
 class TestSelectUpgradeScripts:
     def test_no_versions_returns_empty(self, tmp_path):
         sel = make_selector(tmp_path)
-        files, max_v, has = sel.select_upgrade_scripts("svc", None)
+        files, max_v, has = sel.select_upgrade_scripts("svc", "1.0.0")
         assert files == [] and max_v == "" and has is False
-
-    def test_install_collects_all_scripts(self, tmp_path):
-        # installed_version=None → 收集所有版本的增量脚本
-        mk_version(tmp_path, "svc", "mariadb", "1.0.0",
-                   scripts=["01-init-data.sql"], has_init=True)
-        mk_version(tmp_path, "svc", "mariadb", "1.1.0",
-                   scripts=["01-add-col.sql"])
-        sel = make_selector(tmp_path)
-        files, max_v, has = sel.select_upgrade_scripts("svc", None)
-        assert has is True
-        assert max_v == "1.1.0"
-        all_scripts = [os.path.basename(s) for v in files for s in v]
-        assert "01-init-data.sql" in all_scripts
-        assert "01-add-col.sql" in all_scripts
 
     def test_upgrade_skips_installed_and_older(self, tmp_path):
         mk_version(tmp_path, "svc", "mariadb", "1.0.0",
@@ -167,7 +153,7 @@ class TestSelectUpgradeScripts:
         files, max_v, has = sel.select_upgrade_scripts("svc", "1.1.0")
         assert has is True
         assert max_v == "1.2.0"
-        all_scripts = [os.path.basename(s) for v in files for s in v]
+        all_scripts = [os.path.basename(s) for _, scripts in files for s in scripts]
         assert "01-old.sql" not in all_scripts
         assert "01-new.sql" not in all_scripts
         assert "01-newer.sql" in all_scripts
@@ -187,7 +173,7 @@ class TestSelectUpgradeScripts:
                    scripts=["01-add.sql"], has_init=True)
         sel = make_selector(tmp_path)
         files, _, _ = sel.select_upgrade_scripts("svc", "1.0.0")
-        all_scripts = [os.path.basename(s) for v in files for s in v]
+        all_scripts = [os.path.basename(s) for _, scripts in files for s in scripts]
         assert "init.sql" not in all_scripts
 
     def test_scripts_ordered_across_versions(self, tmp_path):
@@ -198,11 +184,13 @@ class TestSelectUpgradeScripts:
                    scripts=["01-c.sql"])
         sel = make_selector(tmp_path)
         files, _, _ = sel.select_upgrade_scripts("svc", "1.0.0")
-        # 每个版本内部按编号排序
-        v1_names = [os.path.basename(s) for s in files[0]]
-        assert v1_names == ["01-a.sql", "02-b.sql"]
-        v2_names = [os.path.basename(s) for s in files[1]]
-        assert v2_names == ["01-c.sql"]
+        # 每个版本内部按编号排序，files 为 [(version, [scripts]), ...]
+        v1_version, v1_scripts = files[0]
+        assert v1_version == "1.1.0"
+        assert [os.path.basename(s) for s in v1_scripts] == ["01-a.sql", "02-b.sql"]
+        v2_version, v2_scripts = files[1]
+        assert v2_version == "1.2.0"
+        assert [os.path.basename(s) for s in v2_scripts] == ["01-c.sql"]
 
     def test_version_dir_with_only_init_produces_no_scripts(self, tmp_path):
         mk_version(tmp_path, "svc", "mariadb", "1.0.0", has_init=True)
@@ -212,3 +200,14 @@ class TestSelectUpgradeScripts:
         # 1.1.0 只有 init.sql，无增量脚本
         assert has is False
         assert max_v == "1.1.0"
+
+    def test_returns_version_and_scripts_tuple(self, tmp_path):
+        mk_version(tmp_path, "svc", "mariadb", "1.0.0", has_init=True)
+        mk_version(tmp_path, "svc", "mariadb", "1.1.0",
+                   scripts=["01-add.sql"])
+        sel = make_selector(tmp_path)
+        files, _, _ = sel.select_upgrade_scripts("svc", "1.0.0")
+        assert len(files) == 1
+        version, scripts = files[0]
+        assert version == "1.1.0"
+        assert [os.path.basename(s) for s in scripts] == ["01-add.sql"]

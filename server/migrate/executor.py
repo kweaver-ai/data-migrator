@@ -25,6 +25,7 @@ from server.migrate.history_manager import HistoryManager
 from server.migrate.script_selector import ScriptSelector
 from server.migrate.json_executor import JsonExecutor
 from server.utils.sql import parse_sql_file
+from server.utils.version import extract_number
 
 
 
@@ -135,49 +136,48 @@ class MigrationExecutor:
             self._install_service(service_name)
 
     def _install_service(self, service_name: str):
-        """首次安装：执行最大版本的 init.sql"""
+        """首次安装：执行最大版本的 init.sql，成功后写 task"""
         self.logger.info(f"[{service_name}] 首次安装")
 
-        # 查找最大版本的 init.sql
         init_path, init_version = self.script_selector.find_init_sql(service_name)
         if not init_path:
             self.logger.warning(f"[{service_name}] 未找到 init.sql，跳过")
             return
 
-        # 注册任务（running）
+        relative_name = f"{init_version}/init.sql"
+
+        try:
+            sql_list = parse_sql_file(init_path, self.logger)
+            self._execute_sql_list_with_idempotency(sql_list)
+        except Exception as ex:
+            self.history_mgr.record(
+                service_name=service_name,
+                version=init_version,
+                script_file_name=relative_name,
+                script_path=init_path,
+                status=TaskStatus.FAILED,
+            )
+            raise Exception(f"[{service_name}] init.sql 执行失败: {ex}")
+
         self.task_mgr.insert_task(
             service_name=service_name,
-            installed_version="",
+            installed_version=init_version,
             target_version=init_version,
-            script_file_name=f"{init_version}/init.sql",
-            status=TaskStatus.RUNNING,
+            script_file_name=relative_name,
         )
-
-        # 执行 init.sql
-        sql_list = parse_sql_file(init_path, self.logger)
-        self._execute_sql_list_with_idempotency(sql_list)
-        self.logger.info(f"[{service_name}] init.sql 执行完成")
-
-        # 记录历史
         self.history_mgr.record(
             service_name=service_name,
             version=init_version,
-            script_file_name=f"{init_version}/init.sql",
+            script_file_name=relative_name,
             script_path=init_path,
-        )
-
-        # 最终状态
-        self.task_mgr.update_status(
-            service_name=service_name,
             status=TaskStatus.SUCCESS,
-            installed_version=init_version,
-            target_version=init_version,
         )
         self.logger.info(f"[{service_name}] 安装完成, version={init_version}")
 
     def _upgrade_service(self, service_name: str, task_record: dict):
         """升级路径"""
         installed_version = task_record["f_installed_version"]
+        last_script = task_record["f_script_file_name"]
         self.logger.info(f"[{service_name}] 升级, installed_version={installed_version}")
 
         upgrade_files, max_version, has_scripts = self.script_selector.select_upgrade_scripts(
@@ -188,54 +188,36 @@ class MigrationExecutor:
             self.logger.info(f"[{service_name}] 无需升级，已是最新版本")
             return
 
-        # 更新状态为 running
-        self.task_mgr.update_status(
-            service_name=service_name,
-            status=TaskStatus.RUNNING,
-            target_version=max_version,
-        )
-
-        self._execute_upgrade_files(service_name, upgrade_files, max_version, installed_version)
-
-        # 成功
-        self.task_mgr.update_status(
-            service_name=service_name,
-            status=TaskStatus.SUCCESS,
-            installed_version=max_version,
-            target_version=max_version,
-        )
+        self._execute_upgrade_files(service_name, upgrade_files, max_version, last_script)
         self.logger.info(f"[{service_name}] 升级完成, version={max_version}")
 
     def _execute_upgrade_files(self, service_name: str, upgrade_files_list: list,
-                               target_version: str, installed_version: str):
-        """执行升级文件列表"""
-        for version_scripts in upgrade_files_list:
+                               target_version: str, last_script: str):
+        """执行升级文件列表，支持断点续跑。
+
+        last_script: task 表中上次成功执行的脚本（格式 "version/filename"），
+                     用于跳过同版本内已完成的脚本。
+        """
+        last_script_version = last_script.split("/")[0] if last_script else None
+        last_script_filename = last_script.split("/")[1] if last_script else ""
+        last_script_seq = extract_number(last_script_filename) if last_script_filename and last_script_filename != "init.sql" else -1
+
+        for version, version_scripts in upgrade_files_list:
             for script_path in version_scripts:
                 script_name = os.path.basename(script_path)
-                # 从路径提取版本号
-                parts = script_path.split(os.sep)
-                version = parts[-2]
                 relative_name = f"{version}/{script_name}"
 
-                self.logger.info(f"[{service_name}] 执行: {relative_name}")
+                # 断点续跑：跳过同版本内已完成的脚本
+                if version == last_script_version:
+                    if extract_number(script_name) <= last_script_seq:
+                        self.logger.info(f"[{service_name}] 跳过（已完成）: {relative_name}")
+                        continue
 
-                # 更新当前脚本到 task
-                self.task_mgr.update_status(
-                    service_name=service_name,
-                    status=TaskStatus.RUNNING,
-                    script_file_name=relative_name,
-                    target_version=target_version,
-                )
+                self.logger.info(f"[{service_name}] 执行: {relative_name}")
 
                 try:
                     self._run_script(script_path)
                 except Exception as ex:
-                    # 失败：记录状态并中断
-                    self.task_mgr.update_status(
-                        service_name=service_name,
-                        status=TaskStatus.FAILED,
-                        script_file_name=relative_name,
-                    )
                     self.history_mgr.record(
                         service_name=service_name,
                         version=version,
@@ -245,14 +227,21 @@ class MigrationExecutor:
                     )
                     raise Exception(f"执行脚本失败: {relative_name}, error: {ex}")
 
-                # 成功：记录历史
+                # 成功：更新 task 的最后成功脚本，记录历史
+                self.task_mgr.record_script_done(service_name, relative_name)
                 self.history_mgr.record(
                     service_name=service_name,
                     version=version,
                     script_file_name=relative_name,
                     script_path=script_path,
+                    status=TaskStatus.SUCCESS,
                 )
                 self.logger.info(f"[{service_name}] 成功: {relative_name}")
+
+            # 版本内所有脚本完成
+            self.task_mgr.record_version_done(service_name, version, target_version)
+            last_script_version = None
+            last_script_seq = -1
 
     def _run_script(self, script_path: str):
         """执行单个脚本文件（.sql 或 .py）"""

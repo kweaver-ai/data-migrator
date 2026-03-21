@@ -33,21 +33,21 @@ class TaskManager:
     f_installed_version VARCHAR(64) NOT NULL DEFAULT '',
     f_target_version VARCHAR(64) NOT NULL DEFAULT '',
     f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    f_status VARCHAR(32) NOT NULL DEFAULT 'pending',
     f_create_time DATETIME NOT NULL,
-    f_update_time DATETIME NOT NULL
+    f_update_time DATETIME NOT NULL,
+    UNIQUE KEY uk_service_name (f_service_name)
 )"""
 
     def select_task(self, service_name: str) -> dict:
         """查询服务的迁移任务记录"""
         sql = (
             f"SELECT * FROM {self.deploy_db}.{self.TABLE} "
-            f"WHERE f_service_name = %s ORDER BY f_id DESC LIMIT 1"
+            f"WHERE f_service_name = %s"
         )
         return self.db.fetch_one(sql, service_name)
 
     def insert_task(self, service_name: str, installed_version: str,
-                    target_version: str, script_file_name: str, status: TaskStatus):
+                    target_version: str, script_file_name: str):
         """插入新任务记录"""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.db.insert(f"{self.deploy_db}.{self.TABLE}", {
@@ -55,37 +55,29 @@ class TaskManager:
             "f_installed_version": installed_version,
             "f_target_version": target_version,
             "f_script_file_name": script_file_name,
-            "f_status": status,
             "f_create_time": now,
             "f_update_time": now,
         })
 
-    def update_status(self, service_name: str, status: TaskStatus,
-                      script_file_name: str = None,
-                      target_version: str = None,
-                      installed_version: str = None):
-        """更新任务状态"""
+    def record_script_done(self, service_name: str, script_file_name: str):
+        """记录单个脚本执行成功（断点续跑锚点）"""
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sets = ["f_status = %s", "f_update_time = %s"]
-        params = [status, now]
-
-        if script_file_name is not None:
-            sets.append("f_script_file_name = %s")
-            params.append(script_file_name)
-        if target_version is not None:
-            sets.append("f_target_version = %s")
-            params.append(target_version)
-        if installed_version is not None:
-            sets.append("f_installed_version = %s")
-            params.append(installed_version)
-
-        params.append(service_name)
         sql = (
             f"UPDATE {self.deploy_db}.{self.TABLE} "
-            f"SET {', '.join(sets)} "
+            f"SET f_script_file_name = %s, f_update_time = %s "
             f"WHERE f_service_name = %s"
         )
-        self.db.execute(sql, *params)
+        self.db.execute(sql, script_file_name, now, service_name)
+
+    def record_version_done(self, service_name: str, installed_version: str, target_version: str):
+        """记录整个版本执行完成"""
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sql = (
+            f"UPDATE {self.deploy_db}.{self.TABLE} "
+            f"SET f_installed_version = %s, f_target_version = %s, f_update_time = %s "
+            f"WHERE f_service_name = %s"
+        )
+        self.db.execute(sql, installed_version, target_version, now, service_name)
 
     def update_service_name(self, old_name: str, new_name: str):
         """服务改名"""

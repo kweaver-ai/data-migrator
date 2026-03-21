@@ -53,19 +53,12 @@ class ScriptSelector:
         return init_path, max_version
 
     def select_upgrade_scripts(self, service_name: str,
-                               installed_version: Optional[str]) -> Tuple[List[List[str]], str, bool]:
+                               installed_version: str) -> Tuple[List[Tuple[str, List[str]]], str, bool]:
         """
-        选择待执行的升级脚本。
-
-        首次安装（installed_version 为 None）：
-          - 逆序找 init.sql(V_base) + V_base 之后的增量脚本
-
-        升级（installed_version 不为 None）：
-          - 跳过 init.sql
-          - 从 installed_version 之后的版本开始，收集增量脚本
+        选择 installed_version 之后待执行的升级脚本。
 
         返回: (upgrade_files_list, max_version, has_scripts)
-          - upgrade_files_list: [[version1 scripts], [version2 scripts], ...]
+          - upgrade_files_list: [(version, [scripts]), ...]
           - max_version: 最大版本号
           - has_scripts: 是否有脚本需要执行
         """
@@ -79,15 +72,14 @@ class ScriptSelector:
         upgrade_files_list = []
 
         for version in versions:
-            # 升级模式：跳过 <= installed_version 的版本
-            if installed_version and compare_version(version, installed_version) <= 0:
+            if compare_version(version, installed_version) <= 0:
                 continue
 
             version_path = os.path.join(db_type_path, version)
             scripts = self._collect_scripts_from_dir(version_path)
 
             if scripts:
-                upgrade_files_list.append(scripts)
+                upgrade_files_list.append((version, scripts))
 
         has_scripts = len(upgrade_files_list) > 0
         return upgrade_files_list, max_version, has_scripts
