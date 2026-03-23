@@ -208,6 +208,7 @@ __marimo__/
 
 config.yaml
 check_rds_config.yaml
+secret.yaml
 
 repos/*
 source_code/*

@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from logging import Logger
+from typing import Optional
 
 import yaml
 import sqlparse
@@ -25,16 +26,15 @@ from server.utils.version import VersionUtil
 _DEFAULT_RDS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "rds", "check_rds_config.yaml")
 
 
-def _load_rds_config() -> dict:
-    config_path = os.environ.get("CHECK_RDS_CONFIG", _DEFAULT_RDS_CONFIG_PATH)
-    with open(config_path, "r", encoding="utf-8") as f:
+def _load_check_rds_config(config_path: Optional[str]) -> dict:
+    path = config_path or _DEFAULT_RDS_CONFIG_PATH
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def _validate_rds_config(rds_cfg: dict, required_db_types: list):
+def _validate_rds_config(rds_cfg: dict, required_db_types: list, config_path: str):
     missing = [t for t in required_db_types if t not in rds_cfg]
     if missing:
-        config_path = os.environ.get("CHECK_RDS_CONFIG", _DEFAULT_RDS_CONFIG_PATH)
         raise Exception(
             f"check_rds_config.yaml 缺少以下数据库类型的连接配置: {missing}，"
             f"配置文件路径: {config_path}"
@@ -42,12 +42,13 @@ def _validate_rds_config(rds_cfg: dict, required_db_types: list):
 
 
 class CheckExecutor:
-    def __init__(self, app_config: AppConfig, logger: Logger):
+    def __init__(self, app_config: AppConfig, logger: Logger, check_rds_config_path: Optional[str] = None):
         self.app_config = app_config
         self.logger = logger
         self.check_config = CheckConfig(app_config)
-        self.rds_cfg = _load_rds_config()
-        _validate_rds_config(self.rds_cfg, app_config.db_types)
+        path = check_rds_config_path or _DEFAULT_RDS_CONFIG_PATH
+        self.rds_cfg = _load_check_rds_config(path)
+        _validate_rds_config(self.rds_cfg, app_config.db_types, path)
 
     def run(self):
         self.logger.info("开始验证数据模型脚本")

@@ -1,3 +1,8 @@
+# config.yaml — 服务列表与版本管理配置（提交到 git / K8s ConfigMap 挂载）
+# 数据库连接配置请参考以下模板文件（不提交到 git）：
+#   secret.yaml.example          → migrate 命令用，单个目标 DB 连接
+#   check_rds_config.yaml.example → verify 命令用，多 DB 类型对比
+
 module: template
 description: 配置模板
 

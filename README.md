@@ -54,7 +54,14 @@ fetch  →  lint  →  verify  →  (merge)  →  migrate
 
 **`init.sql` 定位：** 是该版本的完整数据库快照，而非增量脚本。每个版本目录必须包含 `init.sql`（lint 强制校验）。首次安装时，引擎取**最大版本**的 `init.sql` 执行；升级时跳过所有 `init.sql`，仅执行编号增量脚本。
 
-**Python 脚本：** 以子进程方式执行，通过环境变量注入数据库连接信息（`DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWD`、`DB_TYPE`）。
+**Python 脚本：** 以子进程方式执行，通过环境变量注入依赖服务连接信息：
+
+| 前缀 | 环境变量 |
+|------|---------|
+| RDS | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWD`, `DB_TYPE`, `DB_SOURCE_TYPE` |
+| MongoDB | `MONGODB_HOST`, `MONGODB_PORT`, `MONGODB_USER`, `MONGODB_PASSWORD`, `MONGODB_AUTH_SOURCE` |
+| OpenSearch | `OPENSEARCH_HOST`, `OPENSEARCH_PORT`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`, `OPENSEARCH_PROTOCOL` |
+| Redis | `REDIS_CONNECT_TYPE`, `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` |
 
 ---
 
@@ -66,7 +73,7 @@ fetch  →  lint  →  verify  →  (merge)  →  migrate
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
-| `--config` | 是 | YAML 配置文件路径，参见 `config-template.yaml` |
+| `--config` | 是 | YAML 配置文件路径，参见 `config.yaml.example` |
 | `--service` | 否 | 指定本次操作的服务名称，空格分隔；默认处理配置中全部服务 |
 | `--log-level` | 否 | `DEBUG` / `INFO` / `WARNING` / `ERROR`，默认 `INFO` |
 
@@ -96,46 +103,13 @@ python data-migrator.py lint \
 ### verify — 执行校验（需要测试 DB）
 
 ```bash
-CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml \
-  python data-migrator.py verify \
+python data-migrator.py verify \
   --config config.yaml \
+  --check-rds-config check_rds_config.yaml \
   --service bkn-backend vega-backend
 ```
 
-`check_rds_config.yaml` 指定各数据库类型的测试实例连接信息（默认路径 `server/check/rds/check_rds_config.yaml`）：
-
-```yaml
-mariadb:
-  primary:
-    host: "127.0.0.1"
-    port: 3330
-    user: "root"
-    password: "xxx"
-    charset: "utf8mb4"
-    autocommit: true
-  secondary:
-    host: "127.0.0.1"
-    port: 3331
-    user: "root"
-    password: "xxx"
-    charset: "utf8mb4"
-    autocommit: true
-dm8:
-  primary:
-    host: "127.0.0.1"
-    port: 5237
-    user: "SYSDBA"
-    password: "xxx"
-    autocommit: true
-  secondary:
-    host: "127.0.0.1"
-    port: 5238
-    user: "SYSDBA"
-    password: "xxx"
-    autocommit: true
-```
-
-> 建议将此文件放在项目根目录（已加入 `.gitignore`），通过 `CHECK_RDS_CONFIG` 指向，避免意外提交凭证。
+`--check-rds-config` 指定各数据库类型的测试实例连接信息，默认路径 `server/verify/rds/check_rds_config.yaml`。参见 `check_rds_config.yaml.example`。
 
 ### migrate — 执行迁移（生产部署）
 
@@ -144,22 +118,25 @@ dm8:
 ```bash
 python data-migrator.py migrate \
   --config /app/config.yaml \
+  --secret /etc/data-migrator/secret.yaml \
   --service service-a service-b service-c
 ```
 
+`--secret` 指定依赖服务连接配置文件路径，默认 `/etc/data-migrator/secret.yaml`。K8s 部署时由 Secret 挂载到该路径，无需显式传参。参见 `secret.yaml.example`。
+
+### 配置文件说明
+
+| 文件 | 提交 git | 用途 |
+|------|---------|------|
+| `config.yaml` | ✅ | 服务列表、db_types、check_rules（参见 `config.yaml.example`）|
+| `check_rds_config.yaml` | ❌ | verify 用，多 DB 类型对比连接配置（参见 `check_rds_config.yaml.example`）|
+| `secret.yaml` | ❌ | migrate 用，依赖服务连接配置（参见 `secret.yaml.example`）|
+
 ### 本地开发环境变量
-
-推荐在项目根创建 `.env` 文件（已加入 `.gitignore`）：
-
-```bash
-export MY_PAT=github_pat_xxxx
-export CHECK_RDS_CONFIG=/path/to/check_rds_config.yaml
-```
 
 | 环境变量 | 用于子命令 | 说明 |
 |----------|-----------|------|
 | `MY_PAT` | `fetch` | GitHub PAT，拉取私有仓库时使用 |
-| `CHECK_RDS_CONFIG` | `verify` | 测试 DB 连接配置文件路径 |
 
 ---
 
@@ -187,8 +164,7 @@ python3 -m pytest -v
 python3 server/data-migrator.py lint --config config.yaml
 
 # 执行校验（需要测试 DB）
-CHECK_RDS_CONFIG=check_rds_config.yaml \
-  python3 server/data-migrator.py verify --config config.yaml
+python3 server/data-migrator.py verify --config config.yaml --check-rds-config check_rds_config.yaml
 ```
 
 ---

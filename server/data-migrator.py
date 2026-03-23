@@ -38,12 +38,14 @@ def build_parser() -> argparse.ArgumentParser:
     # ── verify ──
     verify_parser = subparsers.add_parser("verify", help="执行校验：连接测试 DB，运行 SQL + schema 对比")
     verify_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    verify_parser.add_argument("--check-rds-config", default=None, dest="check_rds_config", help="多 DB 对比连接配置文件路径")
     verify_parser.add_argument("--service", nargs="*", default=None, help="指定本次校验的服务（默认全部）")
     verify_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
     # ── migrate ──
     migrate_parser = subparsers.add_parser("migrate", help="执行数据库初始化和升级迁移")
     migrate_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
+    migrate_parser.add_argument("--secret", default=None, help="依赖服务连接配置文件路径")
     migrate_parser.add_argument("--service", nargs="*", default=None, help="指定本次迁移的服务（默认全部）")
     migrate_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
@@ -82,12 +84,12 @@ def main():
         app_config = load_config(args.config, args.service, logger)
 
         from server.verify.executor import CheckExecutor
-        executor = CheckExecutor(app_config, logger)
+        executor = CheckExecutor(app_config, logger, args.check_rds_config)
         executor.run()
 
     elif args.command == "migrate":
         from server.config.loader import load_config
-        app_config = load_config(args.config, args.service, logger)
+        app_config = load_config(args.config, args.service, logger, args.secret)
 
         from server.migrate.executor import MigrationExecutor
         executor = MigrationExecutor(app_config, logger)

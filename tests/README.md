@@ -108,6 +108,20 @@ pip install pytest
 
 ---
 
+### `test_rds_config.py` — RDS 配置与 secret 加载
+
+覆盖 `server/config/models.py`（RDSConfig）和 `server/config/loader.py`（load_config）：
+
+| 类 / 场景 | 覆盖要点 |
+|-----------|---------|
+| `TestRDSConfigSourceTypeValidation` | `internal` / `external` 合法；非法值、空串、大小写不匹配均报 ValueError |
+| `TestLoaderSourceTypeDefault` | `depServices.rds` 格式加载；`source_type` 默认 `internal`；非法值报错 |
+| `TestSecretLoading` | secret 文件存在时覆盖 `depServices`；文件不存在静默跳过；`secret_path=None` 时使用 config |
+
+> verify 命令通过 `--check-rds-config` 参数指定多 DB 对比配置路径；migrate 命令通过 `--secret` 参数指定依赖服务连接配置路径，不再依赖 `CHECK_RDS_CONFIG` / `SECRET_PATH` 环境变量。
+
+---
+
 ### `test_fetch_executor.py` — Fetch 执行器
 
 覆盖 `server/fetch/executor.py`，使用 `pytest` 的 `tmp_path` / `monkeypatch` fixture 构造临时目录，无网络/git 依赖：
