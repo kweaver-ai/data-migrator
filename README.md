@@ -169,6 +169,48 @@ python3 server/data-migrator.py verify --config config.yaml --check-rds-config c
 
 ---
 
+## 镜像构建
+
+### 基础镜像（平台团队维护）
+
+基础镜像包含引擎代码和所有运行时依赖，由平台团队构建并推送到镜像仓库：
+
+```bash
+docker build -f docker/Dockerfile -t acr.aishu.cn/dip/data-migrator-base:<version> .
+docker push acr.aishu.cn/dip/data-migrator-base:<version>
+```
+
+### 部门镜像（各部门 CI 构建）
+
+各部门基于基础镜像做二次构建，将自己的 `config.yaml` 和 `repos/` 打入镜像。
+
+参考 `docker/Dockerfile.example`，复制到部门仓库后按需修改 `BASE_IMAGE`：
+
+```bash
+# 1. 拉取迁移脚本
+MY_PAT=<github_pat> python3 server/data-migrator.py fetch --config config.yaml
+
+# 2. 静态校验
+python3 server/data-migrator.py lint --config config.yaml
+
+# 3. 构建部门镜像（仅 COPY config.yaml + repos/，秒级完成）
+docker build \
+  --build-arg BASE_IMAGE=acr.aishu.cn/dip/data-migrator-base:<version> \
+  -t <registry>/<dept>/data-migrator:<tag> .
+
+# 4. 推送
+docker push <registry>/<dept>/data-migrator:<tag>
+```
+
+### 文件说明
+
+| 文件 | 用途 |
+|------|------|
+| `docker/Dockerfile` | 基础镜像构建文件，平台团队维护 |
+| `docker/Dockerfile.example` | 部门镜像构建模板，复制到部门仓库使用 |
+
+---
+
 ## 技术限制
 
 - **DDL 不可回滚** — 多数数据库 DDL 触发隐式提交，失败后需人工修复业务库，引擎通过熔断锁定保护现场

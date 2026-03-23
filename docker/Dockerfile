@@ -3,8 +3,6 @@ FROM ubuntu:24.04
 WORKDIR /app
 
 COPY server ./server
-COPY repos ./repos
-COPY config-template.yaml ./config.yaml
 
 RUN set -ex; \
   apt-get update; \
