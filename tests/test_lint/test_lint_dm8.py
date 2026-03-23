@@ -126,9 +126,9 @@ class TestParseCreateTable:
         lint._parse_and_check_create_table(SIMPLE_TABLE, db)
         assert "t_user" in db.Tables
 
-    def test_missing_if_not_exists_raises(self, lint, db):
-        with pytest.raises(Exception, match="IF NOT EXISTS"):
-            lint._parse_and_check_create_table(TABLE_NO_IF_NOT_EXISTS, db)
+    def test_without_if_not_exists_ok(self, lint, db):
+        lint._parse_and_check_create_table(TABLE_NO_IF_NOT_EXISTS, db)
+        assert "t_user" in db.Tables
 
     def test_no_primary_key_raises(self, lint, db):
         with pytest.raises(Exception, match="主键"):

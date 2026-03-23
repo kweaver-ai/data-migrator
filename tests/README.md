@@ -88,7 +88,7 @@ pip install pytest
 | 场景 | 规则 |
 |------|------|
 | 首句 | 必须是 `SET SCHEMA` |
-| 建表 | 必须有 `IF NOT EXISTS`，不允许表选项 |
+| 建表 | `IF NOT EXISTS` 可选，不允许表选项 |
 | 主键 | `CLUSTER PRIMARY KEY` |
 | `SET IDENTITY_INSERT` | init / update 中合法 |
 | `check_column` | `CHAR` 类型禁用；`VARCHAR` 必须使用 `VARCHAR(n CHAR)` 格式；整数类型不允许指定长度 |
@@ -103,8 +103,19 @@ pip install pytest
 | 场景 | 规则 |
 |------|------|
 | 首句 | 必须是 `SET SEARCH_PATH TO`（与 DM8 的 `SET SCHEMA` 不同） |
-| 建表 | 必须有 `IF NOT EXISTS`，不允许表选项 |
-| `check_update` | `DELETE` 不允许（与 MariaDB / DM8 不同） |
+| 建表 | `IF NOT EXISTS` 可选，不允许表选项 |
+| `check_update` | `INSERT` / `UPDATE` / `DELETE` 均允许 |
+
+---
+
+### `test_fetch_executor.py` — Fetch 执行器
+
+覆盖 `server/fetch/executor.py`，使用 `pytest` 的 `tmp_path` / `monkeypatch` fixture 构造临时目录，无网络/git 依赖：
+
+| 类 / 方法 | 覆盖要点 |
+|-----------|---------|
+| `FetchExecutor._collect_repos` | 正常复制、db_type 缺失回退 DEFAULT_DB_TYPE、两者均缺失报错、多服务 × 多 db_type |
+| `FetchExecutor._copy_version_dirs` | 只复制版本号目录、非版本目录跳过、空源目录不报错 |
 
 ---
 
@@ -135,3 +146,19 @@ pip install pytest
 | `parse_sql_use_db` | 普通 / 反引号、缺少 db 名报错 |
 | `parse_sql_column_define` | 完整列定义（类型、长度、NULL、DEFAULT、COMMENT、CHARACTER SET、COLLATE、UNSIGNED、AUTO_INCREMENT）|
 | `get_column_type` | 全类型参数化覆盖（17 种）、UNKNOWN、大小写不敏感 |
+
+
+### 
+测试用的容器启动脚本
+
+docker run -d -p 5237:5236 --name dm8-1 -e SYSDBA_PWD=SYSDBA_dm001 -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
+
+docker run -d -p 5238:5236 --name dm8-2 -e SYSDBA_PWD=SYSDBA_dm001 -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
+
+docker run -d -p 54322:54321 --privileged --name kingbase-1 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD=system kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
+
+docker run -d -p 54323:54321 --privileged --name kingbase-2 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD=system kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
+
+docker run -d -p 3330:3306 --name mariadb-1 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD=eisoo.com mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve
+
+docker run -d -p 3331:3306 --name mariadb-2 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD=eisoo.com mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve

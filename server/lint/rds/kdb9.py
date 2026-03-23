@@ -11,7 +11,7 @@ from server.lint.rds.base import LintRDS
 from server.db.dialect._parser.kdb9 import KDB9Parser
 from server.verify.check_config import CheckConfig
 from server.utils.table_define import Database, Table, Index, PrimaryIndex, UniqueIndex, Column
-from server.utils.token import next_token, next_tokens
+from server.utils.token import next_token, next_tokens, find_matching_paren
 
 
 class LintKDB9(KDB9Parser, LintRDS):
@@ -51,11 +51,11 @@ class LintKDB9(KDB9Parser, LintRDS):
                         raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
                     continue
                 else:
-                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE/VIEW/INDEX/UNIQUE INDEX': {sql}")
             elif token == "INSERT":
                 continue
             else:
-                raise Exception(f"不合法的sql语句, 仅支持 'SET SEARCH_PATH TO', 'CREATE TABLE', 'INSERT': {sql}")
+                raise Exception(f"不合法的sql语句, 仅支持 'SET', 'CREATE', 'INSERT': {sql}")
 
     def check_update(self, sql_list: list):
         if not sql_list:
@@ -86,9 +86,7 @@ class LintKDB9(KDB9Parser, LintRDS):
                         raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
                     continue
                 else:
-                    raise Exception(f"不合法的sql语句: {sql}")
-            elif token in ("INSERT", "UPDATE"):
-                continue
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE/VIEW/INDEX/UNIQUE INDEX': {sql}")
             elif token == "DROP":
                 token2, remaining_sql = next_token(remaining_sql)
                 if token2.upper() not in ("INDEX", "TABLE", "VIEW"):
@@ -99,23 +97,27 @@ class LintKDB9(KDB9Parser, LintRDS):
                 if token2.upper() != "TABLE":
                     raise Exception(f"不合法的sql语句, 仅支持 'ALTER TABLE': {sql}")
                 continue
+            elif token in ("INSERT", "UPDATE", "DELETE"):
+                continue
             else:
                 raise Exception(f"不合法的sql语句: {sql}")
 
     # ── 建表解析与校验 ────────────────────────────────────────────────────────
 
     def _parse_and_check_create_table(self, sql: str, db: Database):
-        tokens, remaining_sql = next_tokens(sql, 5)
-        if (len(tokens) != 5 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "TABLE"
-                or tokens[2].upper() != "IF" or tokens[3].upper() != "NOT" or tokens[4].upper() != "EXISTS"):
-            raise Exception(f"建表语句需要以 'CREATE TABLE IF NOT EXISTS' 开头: {sql}")
+        _, remaining_sql = next_tokens(sql, 2)  # skip CREATE TABLE
+
+        # skip optional IF NOT EXISTS
+        token, _ = next_token(remaining_sql)
+        if token.upper() == "IF":
+            _, remaining_sql = next_tokens(remaining_sql, 3)  # skip IF NOT EXISTS
 
         table_name_tok, remaining_sql = next_token(remaining_sql)
         table_name = self.get_real_name(table_name_tok)
         table = Table(table_name, self.logger)
         # remaining_sql now starts with "(...)"
 
-        r_idx = remaining_sql.rfind(")")
+        r_idx = find_matching_paren(remaining_sql)
         if r_idx == -1:
             raise Exception(f"不合法的建表语句, 缺少 ')': {sql}")
 

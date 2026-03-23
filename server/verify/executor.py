@@ -131,7 +131,8 @@ class CheckExecutor:
             version_dir = os.path.join(repo_db_path, version.VersionStr)
             if i == 0:
                 self._check_version_init(version_dir, primary)
-            self._check_version_upgrades(version_dir, primary)
+            if len(versions) > 1:
+                self._check_version_upgrades(version_dir, primary)
 
         if len(versions) >= 1:
             last_dir = os.path.join(repo_db_path, versions[-1].VersionStr)

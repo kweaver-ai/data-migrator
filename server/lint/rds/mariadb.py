@@ -51,11 +51,11 @@ class LintMariaDB(MariaDBParser, LintRDS):
                         raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
                     continue
                 else:
-                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE/VIEW/INDEX/UNIQUE INDEX': {sql}")
             elif token == "INSERT":
                 continue
             else:
-                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE TABLE', 'INSERT': {sql}")
+                raise Exception(f"不合法的sql语句, 仅支持 'USE', 'CREATE', 'INSERT': {sql}")
 
     def check_update(self, sql_list: list):
         if not sql_list:
@@ -76,8 +76,10 @@ class LintMariaDB(MariaDBParser, LintRDS):
                 token2 = token2.upper()
                 if token2 == "TABLE":
                     self._parse_and_check_create_table(sql, db)
-                elif token2 in ("UNIQUE", "INDEX"):
-                    continue
+                elif token2 == "UNIQUE":
+                    self._parse_and_check_create_unique_index(sql, db)
+                elif token2 == "INDEX":
+                    self._parse_and_check_create_index(sql, db)
                 elif token2 == "VIEW":
                     continue
                 elif token2 == "OR":
@@ -86,9 +88,7 @@ class LintMariaDB(MariaDBParser, LintRDS):
                         raise Exception(f"不合法的sql语句, 仅支持 'CREATE OR REPLACE VIEW': {sql}")
                     continue
                 else:
-                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE': {sql}")
-            elif token in ("INSERT", "UPDATE", "DELETE"):
-                continue
+                    raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE/VIEW/INDEX/UNIQUE INDEX': {sql}")
             elif token == "DROP":
                 token2, remaining_sql = next_token(remaining_sql)
                 if token2.upper() not in ("INDEX", "TABLE", "VIEW"):
@@ -100,6 +100,8 @@ class LintMariaDB(MariaDBParser, LintRDS):
                     raise Exception(f"不合法的sql语句, 仅支持 'ALTER TABLE': {sql}")
                 continue
             elif token == "RENAME":
+                continue
+            elif token in ("INSERT", "UPDATE", "DELETE"):
                 continue
             else:
                 raise Exception(f"不合法的sql语句: {sql}")

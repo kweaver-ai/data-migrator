@@ -65,8 +65,8 @@ def main():
         from server.config.loader import load_config
         app_config = load_config(args.config, args.service, logger)
 
-        from server.fetch.collector import CollectExecutor
-        executor = CollectExecutor(app_config, logger)
+        from server.fetch.executor import FetchExecutor
+        executor = FetchExecutor(app_config, logger)
         executor.run()
 
     elif args.command == "lint":

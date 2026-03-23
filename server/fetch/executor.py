@@ -17,17 +17,17 @@ from server.utils.version import is_version_dir
 DEFAULT_DB_TYPE = "mariadb"
 
 
-class CollectExecutor:
+class FetchExecutor:
     def __init__(self, app_config: AppConfig, logger: Logger):
         self.app_config = app_config
         self.logger = logger
 
     def run(self):
         """收集子命令主入口"""
-        self._pull_repos()
+        self._fetch_sources()
         self._collect_repos()
 
-    def _pull_repos(self):
+    def _fetch_sources(self):
         """从 GitHub 仓库拉取代码（GitPython + sparse-checkout）"""
         self.logger.info("开始拉取代码库")
 

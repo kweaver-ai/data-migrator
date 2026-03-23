@@ -112,10 +112,8 @@ class TestCheckUpdate:
         lint.check_update([SET_PATH, "INSERT INTO t_user VALUES (1, 'a')",
                            "UPDATE t_user SET f_name = 'b'"])
 
-    def test_delete_not_allowed_raises(self, lint):
-        # KDB9 check_update 不允许 DELETE（与 MariaDB/DM8 不同）
-        with pytest.raises(Exception):
-            lint.check_update([SET_PATH, "DELETE FROM t_user WHERE f_id = 1"])
+    def test_valid_delete(self, lint):
+        lint.check_update([SET_PATH, "DELETE FROM t_user WHERE f_id = 1"])
 
     def test_first_stmt_not_set_raises(self, lint):
         with pytest.raises(Exception, match="SET SEARCH_PATH"):
@@ -137,9 +135,9 @@ class TestParseCreateTable:
         lint._parse_and_check_create_table(SIMPLE_TABLE, db)
         assert "t_user" in db.Tables
 
-    def test_missing_if_not_exists_raises(self, lint, db):
-        with pytest.raises(Exception, match="IF NOT EXISTS"):
-            lint._parse_and_check_create_table(TABLE_NO_IF_NOT_EXISTS, db)
+    def test_without_if_not_exists_ok(self, lint, db):
+        lint._parse_and_check_create_table(TABLE_NO_IF_NOT_EXISTS, db)
+        assert "t_user" in db.Tables
 
     def test_no_primary_key_raises(self, lint, db):
         with pytest.raises(Exception, match="主键"):
