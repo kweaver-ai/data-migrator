@@ -119,7 +119,8 @@ class LintMariaDB(MariaDBParser, LintRDS):
         table_name_tok, remaining_sql = next_token(remaining_sql)
         table_name = self.get_real_name(table_name_tok)
         table = Table(table_name, self.logger)
-        # remaining_sql now starts with "(...)"
+        # remaining_sql now starts with "(...)", 兼容开括号换行写法
+        remaining_sql = remaining_sql.lstrip()
 
         r_idx = find_matching_paren(remaining_sql)
         if r_idx == -1:
