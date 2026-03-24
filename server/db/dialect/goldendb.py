@@ -16,6 +16,3 @@ class GoldenDBDialect(MariaDBDialect):
         super().__init__(rds_config, logger)
 
         self.CREATE_DATABASE_SQL = "CREATE DATABASE IF NOT EXISTS {db_name} CHARSET=utf8mb4 COLLATE=utf8mb4_bin"
-
-    def init_db_config(self):
-        pass
