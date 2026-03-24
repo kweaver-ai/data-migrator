@@ -29,17 +29,27 @@ class HistoryManager:
     f_version VARCHAR(64) NOT NULL DEFAULT '',
     f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
     f_status VARCHAR(32) NOT NULL DEFAULT 'success',
+    f_message TEXT,
     f_create_time DATETIME NOT NULL
 )"""
 
     def record(self, service_name: str, version: str, script_file_name: str,
-               status: TaskStatus):
-        """记录一条迁移历史"""
+               status: TaskStatus, message: str = ""):
+        """记录一条迁移历史
+
+        Args:
+            service_name: 服务名称
+            version: 版本号
+            script_file_name: 脚本文件名
+            status: 执行状态
+            message: 错误信息（失败时填写）
+        """
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.db.insert(f"{self.deploy_db}.{self.TABLE}", {
             "f_service_name": service_name,
             "f_version": version,
             "f_script_file_name": script_file_name,
             "f_status": status,
+            "f_message": message,
             "f_create_time": now,
         })

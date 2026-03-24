@@ -47,12 +47,41 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
         self.RENAME_TABLE_SQL = "ALTER TABLE IF EXISTS {db_name}.{table_name} RENAME TO {new_name}"
         self.DROP_TABLE_SQL = "DROP TABLE IF EXISTS {db_name}.{table_name} CASCADE"
 
+        self.CREATE_FUNCTION_HEX = """
+CREATE OR REPLACE FUNCTION hex(input_text TEXT)
+  RETURNS BYTEA AS $$
+  BEGIN
+    RETURN input_text::BYTEA;
+  END;
+$$ LANGUAGE plpgsql;
+"""
+
+        self.CREATE_FUNCTION_JSON_EXTRACT = """
+CREATE OR REPLACE FUNCTION sys.json_extract(text, VARIADIC jsonpath[])
+RETURNS json
+LANGUAGE c IMMUTABLE PARALLEL SAFE STRICT
+AS '$libdir/mysql_json', 'JsonExtract';
+"""
+
+        self.ALTER_FUNCTION_JSON_EXTRACT = """
+ALTER FUNCTION sys.json_extract(text, VARIADIC jsonpath[]) IMMUTABLE;
+"""
+
     def init_db_config(self):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("ALTER SYSTEM SET sql_mode='ANSI_QUOTES';")
-                    cursor.execute("SELECT sys_reload_conf();")
+                    sqls = [
+                        "ALTER SYSTEM SET sql_mode='ANSI_QUOTES';",
+                        self.SET_DATABASE_SQL.format(db_name="deploy"),
+                        self.CREATE_FUNCTION_HEX,
+                        self.CREATE_FUNCTION_JSON_EXTRACT,
+                        self.ALTER_FUNCTION_JSON_EXTRACT,
+                        "SELECT sys_reload_conf();",
+                    ]
+                    for sql in sqls:
+                        self.logger.info(f"[SQL] {sql}")
+                        cursor.execute(sql)
         except Exception as e:
             raise Exception(f"init kdb9 config failed, error: {e}")
 
@@ -61,6 +90,7 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
     def _run_sql_alter(self, cursor, current_db, sql, remaining):
         token2, remaining2 = next_token(remaining)
         if token2.upper() != "TABLE":
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
 
@@ -86,6 +116,7 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 constraint_token, _ = next_token(remaining5)
@@ -95,8 +126,10 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "DROP":
@@ -113,6 +146,7 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 token, remaining6 = next_token(remaining5)
@@ -125,8 +159,10 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "MODIFY":
@@ -139,8 +175,10 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "RENAME":
@@ -154,6 +192,7 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 constraint_token, _ = next_token(remaining5)
@@ -163,6 +202,7 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "TO":
                 check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=tbl_name)
@@ -170,8 +210,11 @@ class KDB9Dialect(KDB9Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)

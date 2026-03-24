@@ -50,11 +50,16 @@ class DM8Dialect(DM8Parser, RDSDialect):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute("SP_SET_PARA_VALUE(1,'GROUP_OPT_FLAG',1);")
-                    cursor.execute("SP_SET_PARA_VALUE(1,'ENABLE_BLOB_CMP_FLAG',1);")
-                    cursor.execute("SP_SET_PARA_VALUE(1,'PK_WITH_CLUSTER',0);")
-                    cursor.execute("alter system set 'COMPATIBLE_MODE'=4 spfile;")
-                    cursor.execute("alter system set 'MVCC_RETRY_TIMES'=15 spfile;")
+                    sqls = [
+                        "SP_SET_PARA_VALUE(1,'GROUP_OPT_FLAG',1);",
+                        "SP_SET_PARA_VALUE(1,'ENABLE_BLOB_CMP_FLAG',1);",
+                        "SP_SET_PARA_VALUE(1,'PK_WITH_CLUSTER',0);",
+                        "alter system set 'COMPATIBLE_MODE'=4 spfile;",
+                        "alter system set 'MVCC_RETRY_TIMES'=15 spfile;",
+                    ]
+                    for sql in sqls:
+                        self.logger.info(f"[SQL] {sql}")
+                        cursor.execute(sql)
         except Exception as e:
             raise Exception(f"init dm8 config failed, error: {e}")
 
@@ -65,10 +70,12 @@ class DM8Dialect(DM8Parser, RDSDialect):
         token2_upper = token2.upper()
 
         if token2_upper == "INDEX":
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
 
         if token2_upper != "TABLE":
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
 
@@ -91,6 +98,7 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 constraint_token, _ = next_token(remaining5)
@@ -100,8 +108,10 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "DROP":
@@ -118,6 +128,7 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 constraint_token, _ = next_token(remaining5)
@@ -127,8 +138,10 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "MODIFY":
@@ -139,6 +152,7 @@ class DM8Dialect(DM8Parser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "RENAME":
@@ -152,6 +166,7 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "CONSTRAINT":
                 constraint_token, _ = next_token(remaining5)
@@ -161,6 +176,7 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             elif obj_type_upper == "TO":
                 check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=tbl_name)
@@ -168,8 +184,11 @@ class DM8Dialect(DM8Parser, RDSDialect):
                     if self.logger:
                         self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")
                 else:
+                    self.logger.info(f"[SQL] {sql}")
                     cursor.execute(sql)
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)

@@ -55,7 +55,10 @@ class MigrationExecutor:
         # 2. 服务改名
         self._handle_renamed_services()
 
-        # 3. 遍历服务
+        # 3. 确保数据库存在
+        self._ensure_databases_exist()
+
+        # 4. 遍历服务
         services = self._list_services()
         for service_name in services:
             try:
@@ -92,13 +95,11 @@ class MigrationExecutor:
         """external 模式：校验 deploy 库和管控表已存在，否则报错退出"""
         self.logger.info(f"external 模式: 校验 deploy 库存在: {self.deploy_db}")
         if not self.dialect.db_exists(self.deploy_db):
-            raise RuntimeError(f"external 模式: deploy 库 '{self.deploy_db}' 不存在，请手动创建")
+            raise Exception(f"external 模式: deploy 库 '{self.deploy_db}' 不存在，请手动创建")
 
         for table_name in [TaskManager.TABLE, HistoryManager.TABLE]:
             if not self.dialect.table_exists(self.deploy_db, table_name):
-                raise RuntimeError(
-                    f"external 模式: 管控表 '{self.deploy_db}.{table_name}' 不存在，请手动创建"
-                )
+                raise Exception( f"external 模式: 管控表 '{self.deploy_db}.{table_name}' 不存在，请手动创建")
         self.logger.info("deploy 管控表校验通过")
 
     def _handle_renamed_services(self):
@@ -109,6 +110,29 @@ class MigrationExecutor:
             if old_name and new_name:
                 self.logger.info(f"服务改名: {old_name} -> {new_name}")
                 self.task_mgr.update_service_name(old_name, new_name)
+
+    def _ensure_databases_exist(self):
+        """确保配置中的数据库存在
+
+        internal 模式: 数据库不存在时自动创建
+        external 模式: 数据库不存在时报错，不创建
+        """
+        if self.app_config.rds.source_type == "external":
+            for db_name in self.app_config.databases:
+                if not self.dialect.db_exists(db_name):
+                    raise Exception(f"external 模式: 数据库 '{db_name}' 不存在，请手动创建")
+                self.logger.debug(f"数据库已存在: {db_name}")
+        else:
+            for db_name in self.app_config.databases:
+                if not self.dialect.db_exists(db_name):
+                    self.logger.info(f"创建数据库: {db_name}")
+                    try:
+                        self.dialect.create_db(db_name)
+                    except Exception as e:
+                        self.logger.error(f"创建数据库可能失败: {db_name}, 错误: {e}")
+                        raise Exception(f"internal 模式: 数据库 '{db_name}' 创建失败，请检查数据库配置")
+                else:
+                    self.logger.debug(f"数据库已存在，跳过: {db_name}")
 
     def _list_services(self):
         """获取要迁移的服务列表"""
@@ -159,6 +183,7 @@ class MigrationExecutor:
                 version=init_version,
                 script_file_name=relative_name,
                 status=TaskStatus.FAILED,
+                message=str(ex),
             )
             raise Exception(f"[{service_name}] init.sql 执行失败: {ex}")
 
@@ -225,6 +250,7 @@ class MigrationExecutor:
                         version=version,
                         script_file_name=relative_name,
                         status=TaskStatus.FAILED,
+                        message=str(ex),
                     )
                     raise Exception(f"执行脚本失败: {relative_name}, error: {ex}")
 

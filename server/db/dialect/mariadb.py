@@ -60,6 +60,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
         tbl_name = self.get_real_name(tbl_token)
         check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
         if self._check_exists(cursor, check_sql):
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
         elif self.logger:
             self.logger.info(f"[run_sql] index {idx_name} 不存在, 跳过")
@@ -67,6 +68,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
     def _run_sql_alter(self, cursor, current_db, sql, remaining):
         token2, remaining2 = next_token(remaining)
         if token2.upper() != "TABLE":
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
 
@@ -88,6 +90,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "DROP" and obj_type_upper == "COLUMN":
@@ -101,6 +104,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "MODIFY" and obj_type_upper == "COLUMN":
@@ -114,6 +118,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "RENAME" and obj_type_upper == "COLUMN":
@@ -127,6 +132,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "RENAME" and obj_type_upper == "INDEX":
@@ -137,6 +143,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] index {idx_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "ADD" and obj_type_upper == "CONSTRAINT":
@@ -147,6 +154,7 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif action == "DROP" and obj_type_upper == "CONSTRAINT":
@@ -160,14 +168,17 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
 
     def _run_sql_rename(self, cursor, current_db, sql, remaining):
         token2, remaining2 = next_token(remaining)
         if token2.upper() != "TABLE":
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
         token3, remaining3 = next_token(remaining2)
@@ -180,4 +191,5 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
             if self.logger:
                 self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)

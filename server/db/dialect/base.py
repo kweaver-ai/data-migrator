@@ -98,6 +98,7 @@ class RDSDialect(ABC):
     # ── 公共辅助 ─────────────────────────────────────────────────────────────
 
     def _check_exists(self, cursor, query: str) -> bool:
+        self.logger.info(f"[SQL] {query}")
         cursor.execute(query)
         return len(cursor.fetchall()) > 0
 
@@ -131,6 +132,7 @@ class RDSDialect(ABC):
                         if token == set_db_keyword:
                             db = self.parse_sql_use_db(sql)
                             exec_sql = self.SET_DATABASE_SQL.format(db_name=db.DBName)
+                            self.logger.info(f"[SQL] {exec_sql}")
                             cursor.execute(exec_sql)
 
                         elif token == "CREATE":
@@ -146,6 +148,7 @@ class RDSDialect(ABC):
                             self._run_sql_rename(cursor, current_db, sql, remaining)
 
                         else:
+                            self.logger.info(f"[SQL] {sql}")
                             cursor.execute(sql)
 
         except Exception as e:
@@ -168,6 +171,7 @@ class RDSDialect(ABC):
                 if self.logger:
                     self.logger.info(f"[run_sql] table {name} 已存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif token2 == "VIEW":
@@ -183,10 +187,12 @@ class RDSDialect(ABC):
                 if self.logger:
                     self.logger.info(f"[run_sql] view {name} 已存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif token2 == "OR":
             # CREATE OR REPLACE VIEW — 天然幂等
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
 
         elif token2 == "INDEX":
@@ -197,6 +203,7 @@ class RDSDialect(ABC):
             self._run_sql_create_index(cursor, current_db, sql, remaining3)
 
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
 
     def _run_sql_drop(self, cursor, current_db, sql, remaining):
@@ -214,6 +221,7 @@ class RDSDialect(ABC):
                 if self.logger:
                     self.logger.info(f"[run_sql] table {name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif token2 == "VIEW":
@@ -227,16 +235,19 @@ class RDSDialect(ABC):
                 if self.logger:
                     self.logger.info(f"[run_sql] view {name} 不存在, 跳过")
             else:
+                self.logger.info(f"[SQL] {sql}")
                 cursor.execute(sql)
 
         elif token2 == "INDEX":
             self._run_sql_drop_index(cursor, current_db, sql, remaining2)
 
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
 
     def _run_sql_create_index(self, cursor, current_db, sql, remaining):
         if self.QUERY_INDEX_SQL is None:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
         token, remaining2 = next_token(remaining)
@@ -254,18 +265,22 @@ class RDSDialect(ABC):
             if self.logger:
                 self.logger.info(f"[run_sql] index {idx_name} 已存在, 跳过")
         else:
+            self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
 
     def _run_sql_drop_index(self, cursor, current_db, sql, remaining):
         """默认直接执行（依赖 SQL 自带 IF EXISTS）；子类可 override"""
+        self.logger.info(f"[SQL] {sql}")
         cursor.execute(sql)
 
     def _run_sql_alter(self, cursor, current_db, sql, remaining):
         """默认直接执行；子类按 DB 语法 override 以实现幂等"""
+        self.logger.info(f"[SQL] {sql}")
         cursor.execute(sql)
 
     def _run_sql_rename(self, cursor, current_db, sql, remaining):
         """默认直接执行；子类按 DB 语法 override"""
+        self.logger.info(f"[SQL] {sql}")
         cursor.execute(sql)
 
     # ── JSON 升级文件操作（check schema 执行 / migrate 执行共用）────────────
@@ -274,13 +289,17 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exists = self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
                         db_name=db_name, table_name=table_name, column_name=column_name))
                     if not exists:
-                        cursor.execute(self.ADD_COLUMN_SQL.format(
+                        add_sql = self.ADD_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name,
-                            column_property=column_property, column_comment=column_comment))
+                            column_property=column_property, column_comment=column_comment)
+                        self.logger.info(f"[SQL] {add_sql}")
+                        cursor.execute(add_sql)
         except Exception as e:
             raise Exception(f"add_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -288,12 +307,16 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name)):
-                        cursor.execute(self.MODIFY_COLUMN_SQL.format(
+                        modify_sql = self.MODIFY_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name,
-                            column_property=column_property, column_comment=column_comment))
+                            column_property=column_property, column_comment=column_comment)
+                        self.logger.info(f"[SQL] {modify_sql}")
+                        cursor.execute(modify_sql)
         except Exception as e:
             raise Exception(f"modify_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -301,12 +324,16 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name)):
-                        cursor.execute(self.RENAME_COLUMN_SQL.format(
+                        rename_sql = self.RENAME_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name,
-                            new_name=new_name, column_property=column_property, column_comment=column_comment))
+                            new_name=new_name, column_property=column_property, column_comment=column_comment)
+                        self.logger.info(f"[SQL] {rename_sql}")
+                        cursor.execute(rename_sql)
         except Exception as e:
             raise Exception(f"rename_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -314,11 +341,15 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     if self._check_exists(cursor, self.QUERY_COLUMN_SQL.format(
                             db_name=db_name, table_name=table_name, column_name=column_name)):
-                        cursor.execute(self.DROP_COLUMN_SQL.format(
-                            db_name=db_name, table_name=table_name, column_name=column_name))
+                        drop_sql = self.DROP_COLUMN_SQL.format(
+                            db_name=db_name, table_name=table_name, column_name=column_name)
+                        self.logger.info(f"[SQL] {drop_sql}")
+                        cursor.execute(drop_sql)
         except Exception as e:
             raise Exception(f"drop_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -326,15 +357,19 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exists = False
                     if self.QUERY_INDEX_SQL:
                         exists = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
                             db_name=db_name, table_name=table_name, index_name=index_name))
                     if not exists:
-                        cursor.execute(self.ADD_INDEX_SQL.format(
+                        add_sql = self.ADD_INDEX_SQL.format(
                             db_name=db_name, table_name=table_name, index_type=index_type,
-                            index_name=index_name, index_property=index_property, index_comment=index_comment))
+                            index_name=index_name, index_property=index_property, index_comment=index_comment)
+                        self.logger.info(f"[SQL] {add_sql}")
+                        cursor.execute(add_sql)
         except Exception as e:
             raise Exception(f"add_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -344,14 +379,18 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exist = True
                     if self.QUERY_INDEX_SQL:
                         exist = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
                             db_name=db_name, table_name=table_name, index_name=index_name))
                     if exist:
-                        cursor.execute(self.RENAME_INDEX_SQL.format(
-                            db_name=db_name, table_name=table_name, index_name=index_name, new_name=new_name))
+                        rename_sql = self.RENAME_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name, new_name=new_name)
+                        self.logger.info(f"[SQL] {rename_sql}")
+                        cursor.execute(rename_sql)
         except Exception as e:
             raise Exception(f"rename_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -359,14 +398,18 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exist = True
                     if self.QUERY_INDEX_SQL:
                         exist = self._check_exists(cursor, self.QUERY_INDEX_SQL.format(
                             db_name=db_name, table_name=table_name, index_name=index_name))
                     if exist:
-                        cursor.execute(self.DROP_INDEX_SQL.format(
-                            db_name=db_name, table_name=table_name, index_name=index_name))
+                        drop_sql = self.DROP_INDEX_SQL.format(
+                            db_name=db_name, table_name=table_name, index_name=index_name)
+                        self.logger.info(f"[SQL] {drop_sql}")
+                        cursor.execute(drop_sql)
         except Exception as e:
             raise Exception(f"drop_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -376,15 +419,19 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exists = False
                     if self.QUERY_CONSTRAINT_SQL:
                         exists = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
                             db_name=db_name, table_name=table_name, constraint_name=constraint_name))
                     if not exists:
-                        cursor.execute(self.ADD_CONSTRAINT_SQL.format(
+                        add_sql = self.ADD_CONSTRAINT_SQL.format(
                             db_name=db_name, table_name=table_name,
-                            constraint_name=constraint_name, constraint_property=constraint_property))
+                            constraint_name=constraint_name, constraint_property=constraint_property)
+                        self.logger.info(f"[SQL] {add_sql}")
+                        cursor.execute(add_sql)
         except Exception as e:
             raise Exception(f"add_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -394,15 +441,19 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exist = True
                     if self.QUERY_CONSTRAINT_SQL:
                         exist = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
                             db_name=db_name, table_name=table_name, constraint_name=constraint_name))
                     if exist:
-                        cursor.execute(self.RENAME_CONSTRAINT_SQL.format(
+                        rename_sql = self.RENAME_CONSTRAINT_SQL.format(
                             db_name=db_name, table_name=table_name,
-                            constraint_name=constraint_name, new_name=new_name))
+                            constraint_name=constraint_name, new_name=new_name)
+                        self.logger.info(f"[SQL] {rename_sql}")
+                        cursor.execute(rename_sql)
         except Exception as e:
             raise Exception(f"rename_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -412,14 +463,18 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     exist = True
                     if self.QUERY_CONSTRAINT_SQL:
                         exist = self._check_exists(cursor, self.QUERY_CONSTRAINT_SQL.format(
                             db_name=db_name, table_name=table_name, constraint_name=constraint_name))
                     if exist:
-                        cursor.execute(self.DROP_CONSTRAINT_SQL.format(
-                            db_name=db_name, table_name=table_name, constraint_name=constraint_name))
+                        drop_sql = self.DROP_CONSTRAINT_SQL.format(
+                            db_name=db_name, table_name=table_name, constraint_name=constraint_name)
+                        self.logger.info(f"[SQL] {drop_sql}")
+                        cursor.execute(drop_sql)
         except Exception as e:
             raise Exception(f"drop_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -427,11 +482,15 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     if self._check_exists(cursor, self.QUERY_TABLE_SQL.format(
                             db_name=db_name, table_name=table_name)):
-                        cursor.execute(self.RENAME_TABLE_SQL.format(
-                            db_name=db_name, table_name=table_name, new_name=new_name))
+                        rename_sql = self.RENAME_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name, new_name=new_name)
+                        self.logger.info(f"[SQL] {rename_sql}")
+                        cursor.execute(rename_sql)
         except Exception as e:
             raise Exception(f"rename_table: {db_name}.{table_name} 失败: {e}") from e
 
@@ -439,11 +498,15 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.SET_DATABASE_SQL.format(db_name=db_name))
+                    set_db_sql = self.SET_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {set_db_sql}")
+                    cursor.execute(set_db_sql)
                     if self._check_exists(cursor, self.QUERY_TABLE_SQL.format(
                             db_name=db_name, table_name=table_name)):
-                        cursor.execute(self.DROP_TABLE_SQL.format(
-                            db_name=db_name, table_name=table_name))
+                        drop_sql = self.DROP_TABLE_SQL.format(
+                            db_name=db_name, table_name=table_name)
+                        self.logger.info(f"[SQL] {drop_sql}")
+                        cursor.execute(drop_sql)
         except Exception as e:
             raise Exception(f"drop_table: {db_name}.{table_name} 失败: {e}") from e
 
@@ -451,22 +514,40 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.DROP_DATABASE_SQL.format(db_name=db_name))
+                    drop_sql = self.DROP_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {drop_sql}")
+                    cursor.execute(drop_sql)
         except Exception as e:
             raise Exception(f"drop_db: {db_name} 失败: {e}") from e
+
+    def create_db(self, db_name):
+        """创建数据库"""
+        try:
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    create_sql = self.CREATE_DATABASE_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {create_sql}")
+                    cursor.execute(create_sql)
+        except Exception as e:
+            raise Exception(f"create_db: {db_name} 失败: {e}") from e
 
     def reset_schema(self, db_names: list):
         """重置数据库 schema（check 用：drop + create）"""
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
+                    self.logger.info(f"[SQL] {self.QUERY_DATABASES_SQL}")
                     cursor.execute(self.QUERY_DATABASES_SQL)
                     rowlist = cursor.fetchall()
                     current_dbs = [row[0] for row in rowlist]
                     for db_name in db_names:
                         if db_name in current_dbs:
-                            cursor.execute(self.DROP_DATABASE_SQL.format(db_name=db_name))
-                        cursor.execute(self.CREATE_DATABASE_SQL.format(db_name=db_name))
+                            drop_sql = self.DROP_DATABASE_SQL.format(db_name=db_name)
+                            self.logger.info(f"[SQL] {drop_sql}")
+                            cursor.execute(drop_sql)
+                        create_sql = self.CREATE_DATABASE_SQL.format(db_name=db_name)
+                        self.logger.info(f"[SQL] {create_sql}")
+                        cursor.execute(create_sql)
         except Exception as e:
             raise Exception(f"reset_schema: {db_names} 失败: {e}") from e
 
@@ -474,6 +555,7 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
+                    self.logger.info(f"[SQL] {self.QUERY_DATABASES_SQL}")
                     cursor.execute(self.QUERY_DATABASES_SQL)
                     names = [row[0].upper() for row in cursor.fetchall()]
                     return db_name.upper() in names
@@ -484,8 +566,10 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.QUERY_TABLE_SQL.format(
-                        db_name=db_name, table_name=table_name))
+                    query_sql = self.QUERY_TABLE_SQL.format(
+                        db_name=db_name, table_name=table_name)
+                    self.logger.info(f"[SQL] {query_sql}")
+                    cursor.execute(query_sql)
                     return len(cursor.fetchall()) > 0
         except Exception as e:
             raise Exception(f"table_exists: {db_name}.{table_name} 检查失败: {e}") from e
@@ -494,7 +578,9 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.QUERY_TABLES_SQL.format(db_name=db_name))
+                    query_sql = self.QUERY_TABLES_SQL.format(db_name=db_name)
+                    self.logger.info(f"[SQL] {query_sql}")
+                    cursor.execute(query_sql)
                     return [row[0] for row in cursor.fetchall()]
         except Exception as e:
             raise Exception(f"list_tables_by_db: {db_name} 失败: {e}") from e
@@ -503,7 +589,9 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(self.QUERY_COLUMNS_SQL.format(db_name=db_name, table_name=table_name))
+                    query_sql = self.QUERY_COLUMNS_SQL.format(db_name=db_name, table_name=table_name)
+                    self.logger.info(f"[SQL] {query_sql}")
+                    cursor.execute(query_sql)
                     columns = [desc[0] for desc in cursor.description]
                     schema = {}
                     for row in cursor.fetchall():
