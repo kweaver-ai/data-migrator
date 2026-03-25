@@ -5,6 +5,9 @@ WORKDIR /app
 COPY server ./server
 
 RUN set -ex; \
+  cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.bak; \
+  sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources; \
+  sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources; \
   apt-get update; \
   apt-get install -y git python3-pip; \
   pip3 config set global.index-url http://mirrors.aliyun.com/pypi/simple/; \
