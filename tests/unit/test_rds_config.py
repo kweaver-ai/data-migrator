@@ -4,7 +4,7 @@
 #
 # Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the project root for details.
-"""RDSConfig source_type 校验 + loader 默认值 + secret 加载测试"""
+"""RDSConfig source_type 校验 + loader 默认值 + secret_config 加载测试"""
 import textwrap
 import tempfile
 import os
@@ -107,7 +107,7 @@ class TestLoaderSourceTypeDefault:
 
 class TestSecretLoading:
     def test_secret_overwrites_dep_services(self):
-        """secret.yaml 存在时，depServices 覆盖 config.yaml 中的同名字段"""
+        """secret-config.yaml 存在时，depServices 覆盖 config.yaml 中的同名字段"""
         config_path = write_yaml("""
             depServices:
               rds:
@@ -138,7 +138,7 @@ class TestSecretLoading:
             os.unlink(secret_path)
 
     def test_missing_secret_file_no_error(self):
-        """secret 文件不存在时静默跳过，使用 config.yaml 中的 depServices"""
+        """secret-config 文件不存在时静默跳过，使用 config.yaml 中的 depServices"""
         config_path = write_yaml("""
             depServices:
               rds:
@@ -149,7 +149,7 @@ class TestSecretLoading:
                 type: mariadb
         """)
         try:
-            cfg = load_config(config_path, None, logger, "/nonexistent/secret.yaml")
+            cfg = load_config(config_path, None, logger, "/nonexistent/secret-config.yaml")
             assert cfg.rds.host == "config-host"
         finally:
             os.unlink(config_path)

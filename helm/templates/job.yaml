@@ -43,12 +43,12 @@ spec:
             - migrate
             - --config
             - /app/config.yaml
-            - --secret
-            - /etc/data-migrator/secret.yaml
+            - --secret-config
+            - /etc/data-migrator/secret-config.yaml
           volumeMounts:
             - name: {{ .Values.moduleName }}-secret
-              mountPath: /etc/data-migrator/secret.yaml
-              subPath: secret.yaml
+              mountPath: /etc/data-migrator/secret-config.yaml
+              subPath: secret-config.yaml
       volumes:
         - name: {{ .Values.moduleName }}-secret
           secret:

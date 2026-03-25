@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── migrate ──
     migrate_parser = subparsers.add_parser("migrate", help="执行数据库初始化和升级迁移")
     migrate_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
-    migrate_parser.add_argument("--secret", default=None, help="依赖服务连接配置文件路径")
+    migrate_parser.add_argument("--secret-config", default=None, dest="secret_config", help="依赖服务连接配置文件路径")
     migrate_parser.add_argument("--service", nargs="*", default=None, help="指定本次迁移的服务（默认全部）")
     migrate_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
@@ -89,7 +89,7 @@ def main():
 
     elif args.command == "migrate":
         from server.config.loader import load_config
-        app_config = load_config(args.config, args.service, logger, args.secret)
+        app_config = load_config(args.config, args.service, logger, args.secret_config)
 
         from server.migrate.executor import MigrationExecutor
         executor = MigrationExecutor(app_config, logger)

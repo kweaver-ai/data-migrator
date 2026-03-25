@@ -21,17 +21,47 @@ class HistoryManager:
         self.logger = logger
         self.deploy_db = rds_config.get_deploy_db_name()
 
-    @classmethod
-    def get_create_table_sql(cls, deploy_db: str) -> str:
-        return f"""CREATE TABLE IF NOT EXISTS {deploy_db}.{cls.TABLE} (
-    f_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    f_service_name VARCHAR(255) NOT NULL,
-    f_version VARCHAR(64) NOT NULL DEFAULT '',
-    f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    f_status VARCHAR(32) NOT NULL DEFAULT 'success',
-    f_message TEXT,
-    f_create_time DATETIME NOT NULL
-)"""
+    @staticmethod
+    def get_create_table_sql(deploy_db: str, db_type: str = "mariadb") -> str:
+        if db_type == "dm8":
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{HistoryManager.TABLE} (
+                    f_id               BIGINT       IDENTITY(1,1),
+                    f_service_name     VARCHAR(255) NOT NULL,
+                    f_version          VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
+                    f_status           VARCHAR(32)  NOT NULL DEFAULT 'success',
+                    f_message          TEXT,
+                    f_create_time      DATETIME     NOT NULL,
+                    CLUSTER PRIMARY KEY ("f_id")
+                );
+            """
+        elif db_type == "kdb9":
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{HistoryManager.TABLE} (
+                    f_id               BIGSERIAL,
+                    f_service_name     VARCHAR(255) NOT NULL,
+                    f_version          VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
+                    f_status           VARCHAR(32)  NOT NULL DEFAULT 'success',
+                    f_message          TEXT,
+                    f_create_time      TIMESTAMP    NOT NULL,
+                    PRIMARY KEY (f_id)
+                );
+            """
+        else:
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{HistoryManager.TABLE} (
+                    `f_id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+                    `f_service_name`     VARCHAR(255) NOT NULL COMMENT '微服务名',
+                    `f_version`          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '脚本所属版本',
+                    `f_script_file_name` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '脚本文件名（version/filename）',
+                    `f_status`           VARCHAR(32)  NOT NULL DEFAULT 'success' COMMENT 'success / failed',
+                    `f_message`          TEXT         COMMENT '失败时的错误信息',
+                    `f_create_time`      DATETIME     NOT NULL COMMENT '执行时间',
+                    PRIMARY KEY (`f_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='迁移历史流水表';
+            """
 
     def record(self, service_name: str, version: str, script_file_name: str,
                status: TaskStatus, message: str = ""):

@@ -5,7 +5,7 @@
 # Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the project root for details.
 import pytest
-from tests.conftest import make_check_config
+from tests.unit.conftest import make_check_config
 from server.lint.rds.mariadb import LintMariaDB
 from server.utils.table_define import Database
 

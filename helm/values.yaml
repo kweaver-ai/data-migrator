@@ -7,8 +7,8 @@ env:
 
 image:
   registry: acr.aishu.cn
-  repository: dip/data-migrator
-  tag: latest
+  repository: kweaver-core/data-migrator
+  tag: test
   pullPolicy: IfNotPresent
 
 securityContext:
@@ -45,7 +45,6 @@ depServices:
     admin_key: ""
     mgmt_host: ""
     mgmt_port: 8888
-    system_id: ""
   mongodb: {}
   opensearch: {}
   redis: {}

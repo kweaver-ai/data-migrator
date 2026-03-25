@@ -97,19 +97,19 @@ def _set_dep_services_env(cfg: dict, rds_config: RDSConfig):
 _DEFAULT_SECRET_PATH = "/etc/data-migrator/secret.yaml"
 
 
-def _load_secret(cfg: dict, logger: Logger, secret_path: Optional[str]):
-    """读取 secret.yaml，将 depServices 覆盖写入 cfg"""
-    path = secret_path or _DEFAULT_SECRET_PATH
+def _load_secret_config(cfg: dict, logger: Logger, secret_config_path: Optional[str]):
+    """读取 secret-config.yaml，将 depServices 覆盖写入 cfg"""
+    path = secret_config_path or _DEFAULT_SECRET_PATH
     if not os.path.exists(path):
         return
-    logger.info(f"加载 secret 文件: {path}")
+    logger.info(f"加载 secret-config 文件: {path}")
     with open(path, "r", encoding="utf-8") as f:
-        secret = yaml.safe_load(f) or {}
-    if "depServices" in secret:
-        cfg["depServices"] = secret["depServices"]
+        secret_config = yaml.safe_load(f) or {}
+    if "depServices" in secret_config:
+        cfg["depServices"] = secret_config["depServices"]
 
 
-def load_config(config_path: str, service_filter: Optional[List[str]], logger: Logger, secret_path: Optional[str] = None) -> AppConfig:
+def load_config(config_path: str, service_filter: Optional[List[str]], logger: Logger, secret_config_path: Optional[str] = None) -> AppConfig:
     """
     加载 YAML 配置文件并构建 AppConfig。
     service_filter: CLI 传入的 --service 参数，用于过滤服务范围；None 表示全部。
@@ -118,7 +118,7 @@ def load_config(config_path: str, service_filter: Optional[List[str]], logger: L
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    _load_secret(cfg, logger, secret_path)
+    _load_secret_config(cfg, logger, secret_config_path)
 
     rds_config = _parse_rds_config(cfg)
     services = _load_services(cfg, service_filter)

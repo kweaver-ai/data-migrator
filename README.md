@@ -118,11 +118,11 @@ python data-migrator.py verify \
 ```bash
 python data-migrator.py migrate \
   --config /app/config.yaml \
-  --secret /etc/data-migrator/secret.yaml \
+  --secret-config /etc/data-migrator/secret-config.yaml \
   --service service-a service-b service-c
 ```
 
-`--secret` 指定依赖服务连接配置文件路径，默认 `/etc/data-migrator/secret.yaml`。K8s 部署时由 Secret 挂载到该路径，无需显式传参。参见 `secret.yaml.example`。
+`--secret-config` 指定依赖服务连接配置文件路径，默认 `/etc/data-migrator/secret-config.yaml`。K8s 部署时由 Secret 挂载到该路径，无需显式传参。参见 `secret-config.yaml.example`。
 
 ### 配置文件说明
 
@@ -130,7 +130,7 @@ python data-migrator.py migrate \
 |------|---------|------|
 | `config.yaml` | ✅ | 服务列表、db_types、check_rules（参见 `config.yaml.example`）|
 | `check_rds_config.yaml` | ❌ | verify 用，多 DB 类型对比连接配置（参见 `check_rds_config.yaml.example`）|
-| `secret.yaml` | ❌ | migrate 用，依赖服务连接配置（参见 `secret.yaml.example`）|
+| `secret-config.yaml` | ❌ | migrate 用，依赖服务连接配置（参见 `secret-config.yaml.example`）|
 
 ### 本地开发环境变量
 

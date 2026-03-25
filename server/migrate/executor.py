@@ -85,8 +85,8 @@ class MigrationExecutor:
         except Exception:
             self.logger.info(f"deploy 库可能已存在: {self.deploy_db}")
 
-        task_ddl = TaskManager.get_create_table_sql(self.deploy_db)
-        history_ddl = HistoryManager.get_create_table_sql(self.deploy_db)
+        task_ddl = self.task_mgr.get_create_table_sql(self.deploy_db, self.app_config.rds.type)
+        history_ddl = HistoryManager.get_create_table_sql(self.deploy_db, self.app_config.rds.type)
         self.operate_db.run_ddl([task_ddl])
         self.operate_db.run_ddl([history_ddl])
         self.logger.info("deploy 管控表就绪")

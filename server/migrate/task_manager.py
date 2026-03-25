@@ -29,18 +29,50 @@ class TaskManager:
         self.logger = logger
         self.deploy_db = rds_config.get_deploy_db_name()
 
-    @classmethod
-    def get_create_table_sql(cls, deploy_db: str) -> str:
-        return f"""CREATE TABLE IF NOT EXISTS {deploy_db}.{cls.TABLE} (
-    f_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    f_service_name VARCHAR(255) NOT NULL,
-    f_installed_version VARCHAR(64) NOT NULL DEFAULT '',
-    f_target_version VARCHAR(64) NOT NULL DEFAULT '',
-    f_script_file_name VARCHAR(512) NOT NULL DEFAULT '',
-    f_create_time DATETIME NOT NULL,
-    f_update_time DATETIME NOT NULL,
-    UNIQUE KEY uk_service_name (f_service_name)
-)"""
+    @staticmethod
+    def get_create_table_sql(deploy_db: str, db_type: str = "mariadb") -> str:
+        if db_type == "dm8":
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{TaskManager.TABLE} (
+                    f_id                BIGINT       IDENTITY(1,1),
+                    f_service_name      VARCHAR(255) NOT NULL,
+                    f_installed_version VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_target_version    VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_script_file_name  VARCHAR(512) NOT NULL DEFAULT '',
+                    f_create_time       DATETIME     NOT NULL,
+                    f_update_time       DATETIME     NOT NULL,
+                    CLUSTER PRIMARY KEY ("f_id"),
+                    CONSTRAINT uk_service_name UNIQUE (f_service_name)
+                );
+            """
+        elif db_type == "kdb9":
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{TaskManager.TABLE} (
+                    f_id                BIGSERIAL,
+                    f_service_name      VARCHAR(255) NOT NULL,
+                    f_installed_version VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_target_version    VARCHAR(64)  NOT NULL DEFAULT '',
+                    f_script_file_name  VARCHAR(512) NOT NULL DEFAULT '',
+                    f_create_time       TIMESTAMP    NOT NULL,
+                    f_update_time       TIMESTAMP    NOT NULL,
+                    PRIMARY KEY (f_id),
+                    CONSTRAINT uk_service_name UNIQUE (f_service_name)
+                );
+            """
+        else:
+            return f"""
+                CREATE TABLE IF NOT EXISTS {deploy_db}.{TaskManager.TABLE} (
+                    `f_id`                BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+                    `f_service_name`      VARCHAR(255) NOT NULL COMMENT '微服务名',
+                    `f_installed_version` VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '已完成的最新版本',
+                    `f_target_version`    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '本次迁移的目标版本',
+                    `f_script_file_name`  VARCHAR(512) NOT NULL DEFAULT '' COMMENT '最后成功执行的脚本（version/filename）',
+                    `f_create_time`       DATETIME     NOT NULL COMMENT '创建时间',
+                    `f_update_time`       DATETIME     NOT NULL COMMENT '最后更新时间',
+                    PRIMARY KEY (`f_id`),
+                    UNIQUE KEY `uk_service_name` (`f_service_name`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='迁移任务主表';
+            """
 
     def select_task(self, service_name: str) -> dict:
         """查询服务的迁移任务记录"""

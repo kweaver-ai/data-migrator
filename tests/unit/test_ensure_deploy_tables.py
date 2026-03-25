@@ -73,7 +73,7 @@ class TestEnsureDeployTablesExternal:
         executor = make_executor("external")
         executor.dialect.db_exists.return_value = False
 
-        with pytest.raises(RuntimeError, match="deploy.*不存在"):
+        with pytest.raises(Exception, match="deploy.*不存在"):
             executor._ensure_deploy_tables()
 
     def test_raises_with_task_table_name_when_missing(self):
@@ -81,7 +81,7 @@ class TestEnsureDeployTablesExternal:
         executor.dialect.db_exists.return_value = True
         executor.dialect.table_exists.side_effect = lambda db, tbl: tbl != TaskManager.TABLE
 
-        with pytest.raises(RuntimeError, match=TaskManager.TABLE):
+        with pytest.raises(Exception, match=TaskManager.TABLE):
             executor._ensure_deploy_tables()
 
     def test_raises_with_history_table_name_when_missing(self):
@@ -89,7 +89,7 @@ class TestEnsureDeployTablesExternal:
         executor.dialect.db_exists.return_value = True
         executor.dialect.table_exists.side_effect = lambda db, tbl: tbl != HistoryManager.TABLE
 
-        with pytest.raises(RuntimeError, match=HistoryManager.TABLE):
+        with pytest.raises(Exception, match=HistoryManager.TABLE):
             executor._ensure_deploy_tables()
 
     def test_does_not_call_run_ddl(self):

@@ -24,11 +24,12 @@ CREATE TABLE IF NOT EXISTS `deploy`.`t_schema_migration_task` (
 
 -- 迁移历史表：每次脚本执行追加一条，success 和 failed 均记录
 CREATE TABLE IF NOT EXISTS `deploy`.`t_schema_migration_history` (
-  `f_id`               BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `f_id`               BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
   `f_service_name`     VARCHAR(255) NOT NULL COMMENT '微服务名',
   `f_version`          VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '脚本所属版本',
   `f_script_file_name` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '脚本文件名（version/filename）',
   `f_status`           VARCHAR(32)  NOT NULL DEFAULT 'success' COMMENT 'success / failed',
+  `f_message`          TEXT         COMMENT '失败时的错误信息',
   `f_create_time`      DATETIME     NOT NULL COMMENT '执行时间',
   PRIMARY KEY (`f_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='迁移历史流水表';
