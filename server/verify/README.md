@@ -33,16 +33,16 @@ CheckExecutor.run()
       └── 跨库 schema 对比       # _compare_schema() — 表数量和列数量一致性
 ```
 
-## RDS 连接配置（check_rds_config.yaml）
+## RDS 连接配置（verify_rds_config.yaml）
 
-阶段二执行校验需要连接真实数据库，连接信息通过独立的 `check_rds_config.yaml` 提供，与主配置文件分离。
+阶段二执行校验需要连接真实数据库，连接信息通过独立的 `verify_rds_config.yaml` 提供，与主配置文件分离。
 
 ### 文件加载规则
 
 | 方式 | 说明 |
 |------|------|
-| 默认路径 | `server/check/rds/check_rds_config.yaml` |
-| 环境变量覆盖 | `CHECK_RDS_CONFIG=/path/to/your_config.yaml` |
+| 默认路径 | `server/check/rds/verify_rds_config.yaml` |
+| 环境变量覆盖 | `VERIFY_RDS_CONFIG=/path/to/your_config.yaml` |
 
 ### 文件结构
 

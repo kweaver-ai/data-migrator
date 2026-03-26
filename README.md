@@ -105,11 +105,11 @@ python data-migrator.py lint \
 ```bash
 python data-migrator.py verify \
   --config config.yaml \
-  --check-rds-config check_rds_config.yaml \
+  --verify-rds-config verify_rds_config.yaml \
   --service bkn-backend vega-backend
 ```
 
-`--check-rds-config` 指定各数据库类型的测试实例连接信息，默认路径 `server/verify/rds/check_rds_config.yaml`。参见 `check_rds_config.yaml.example`。
+`--verify-rds-config` 指定各数据库类型的测试实例连接信息，默认路径 `server/verify/rds/verify_rds_config.yaml`。参见 `verify_rds_config.yaml.example`。
 
 ### migrate — 执行迁移（生产部署）
 
@@ -129,7 +129,7 @@ python data-migrator.py migrate \
 | 文件 | 提交 git | 用途 |
 |------|---------|------|
 | `config.yaml` | ✅ | 服务列表、db_types、check_rules（参见 `config.yaml.example`）|
-| `check_rds_config.yaml` | ❌ | verify 用，多 DB 类型对比连接配置（参见 `check_rds_config.yaml.example`）|
+| `verify_rds_config.yaml` | ❌ | verify 用，多 DB 类型对比连接配置（参见 `verify_rds_config.yaml.example`）|
 | `secret-config.yaml` | ❌ | migrate 用，依赖服务连接配置（参见 `secret-config.yaml.example`）|
 
 ### 本地开发环境变量
@@ -164,7 +164,7 @@ python3 -m pytest -v
 python3 server/data-migrator.py lint --config config.yaml
 
 # 执行校验（需要测试 DB）
-python3 server/data-migrator.py verify --config config.yaml --check-rds-config check_rds_config.yaml
+python3 server/data-migrator.py verify --config config.yaml --verify-rds-config verify_rds_config.yaml
 ```
 
 ---

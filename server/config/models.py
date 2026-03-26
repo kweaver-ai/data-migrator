@@ -45,7 +45,11 @@ class ServiceConfig:
 @dataclass
 class CheckRulesConfig:
     """校验规则配置"""
-    check_type: int = 1  # 1=Latest, 2=Recently, 3=All
+    CheckLatest = 1
+    CheckRecently = 2
+    CheckAll = 3
+
+    check_type: int = CheckAll
     allow_none_primary_key: bool = False
     allow_foreign_key: bool = False
     allow_python_exception: bool = False

@@ -118,7 +118,7 @@ pip install pytest
 | `TestLoaderSourceTypeDefault` | `depServices.rds` 格式加载；`source_type` 默认 `internal`；非法值报错 |
 | `TestSecretLoading` | secret_config 文件存在时覆盖 `depServices`；文件不存在静默跳过；`secret_config_path=None` 时使用 config |
 
-> verify 命令通过 `--check-rds-config` 参数指定多 DB 对比配置路径；migrate 命令通过 `--secret-config` 参数指定依赖服务连接配置路径，不再依赖 `CHECK_RDS_CONFIG` / `SECRET_CONFIG_PATH` 环境变量。
+> verify 命令通过 `--verify-rds-config` 参数指定多 DB 对比配置路径；migrate 命令通过 `--secret-config` 参数指定依赖服务连接配置路径，不再依赖 `VERIFY_RDS_CONFIG` / `SECRET_CONFIG_PATH` 环境变量。
 
 ---
 

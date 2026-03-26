@@ -9,14 +9,14 @@ from logging import Logger
 
 from server.lint.rds.base import LintRDS
 from server.db.dialect._parser.kdb9 import KDB9Parser
-from server.verify.check_config import CheckConfig
+from server.config.models import CheckRulesConfig
 from server.utils.table_define import Database, Table, Index, PrimaryIndex, UniqueIndex, Column
 from server.utils.token import next_token, next_tokens, find_matching_paren
 
 
 class LintKDB9(KDB9Parser, LintRDS):
-    def __init__(self, check_config: CheckConfig, logger: Logger):
-        LintRDS.__init__(self, check_config, logger)
+    def __init__(self, check_rules: CheckRulesConfig, logger: Logger):
+        LintRDS.__init__(self, check_rules, logger)
 
     # ── check_init / check_update ────────────────────────────────────────────
 
@@ -228,7 +228,7 @@ class LintKDB9(KDB9Parser, LintRDS):
 
     def _check_table(self, table: Table):
         if table.PrimaryIndex is None:
-            if self.check_config.AllowNonePrimaryKey:
+            if self.check_rules.allow_none_primary_key:
                 self.logger.warning(f"表 '{table.TableName}' 中缺少主键索引")
             else:
                 raise Exception(f"表 '{table.TableName}' 中缺少主键索引")
@@ -246,7 +246,7 @@ class LintKDB9(KDB9Parser, LintRDS):
             self.check_column(table.TableName, column)
 
         if table.ForeignKeys:
-            if self.check_config.AllowForeignKey:
+            if self.check_rules.allow_foreign_key:
                 self.logger.warning(f"表 '{table.TableName}' 中存在外键约束")
             else:
                 raise Exception(f"表 '{table.TableName}' 中存在外键约束, 但配置中不允许外键约束")

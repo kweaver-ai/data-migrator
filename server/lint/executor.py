@@ -14,8 +14,7 @@ from typing import TYPE_CHECKING
 
 import sqlparse
 
-from server.config.models import AppConfig
-from server.verify.check_config import CheckConfig
+from server.config.models import AppConfig, CheckRulesConfig
 from server.utils.version import VersionUtil
 
 if TYPE_CHECKING:
@@ -26,7 +25,6 @@ class LintExecutor:
     def __init__(self, app_config: AppConfig, logger: Logger):
         self.app_config = app_config
         self.logger = logger
-        self.check_config = CheckConfig(app_config)
 
     def run(self):
         self.logger.info("开始检查代码库目录结构")
@@ -50,17 +48,17 @@ class LintExecutor:
         from server.lint.rds.kdb9 import LintKDB9
 
         if db_type == "mariadb":
-            return LintMariaDB(self.check_config, self.logger)
+            return LintMariaDB(self.app_config.check_rules, self.logger)
         elif db_type == "dm8":
-            return LintDM8(self.check_config, self.logger)
+            return LintDM8(self.app_config.check_rules, self.logger)
         elif db_type == "kdb9":
-            return LintKDB9(self.check_config, self.logger)
+            return LintKDB9(self.app_config.check_rules, self.logger)
         else:
             raise Exception(f"不支持的数据库类型: {db_type}")
 
     def _check_repo(self, repo_path: str, check_from: str) -> bool:
         self.logger.info(f"repo目录: {repo_path}")
-        for db_type in self.check_config.DBTypes:
+        for db_type in self.app_config.db_types:
             lint_rds = self._create_lint_rds(db_type)
             repo_db_path = os.path.join(repo_path, db_type)
             try:
@@ -84,10 +82,10 @@ class LintExecutor:
             from_version = VersionUtil(check_from)
             versions = [v for v in versions if v >= from_version]
 
-        if self.check_config.CheckType == CheckConfig.CheckLatest:
+        if self.app_config.check_rules.check_type == CheckRulesConfig.CheckLatest:
             if len(versions) >= 1:
                 versions = versions[-1:]
-        elif self.check_config.CheckType == CheckConfig.CheckRecently:
+        elif self.app_config.check_rules.check_type == CheckRulesConfig.CheckRecently:
             if len(versions) >= 2:
                 versions = versions[-2:]
 

@@ -8,7 +8,7 @@
 from abc import ABC, abstractmethod
 from logging import Logger
 
-from server.verify.check_config import CheckConfig
+from server.config.models import CheckRulesConfig
 
 
 class LintRDS(ABC):
@@ -18,8 +18,8 @@ class LintRDS(ABC):
     无 DB 连接，无 rdsdriver 引用，可在无数据库的 CI 环境中运行。
     """
 
-    def __init__(self, check_config: CheckConfig, logger: Logger):
-        self.check_config = check_config
+    def __init__(self, check_rules: CheckRulesConfig, logger: Logger):
+        self.check_rules = check_rules
         self.logger = logger
 
     @abstractmethod

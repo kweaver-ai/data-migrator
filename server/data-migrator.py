@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── verify ──
     verify_parser = subparsers.add_parser("verify", help="执行校验：连接测试 DB，运行 SQL + schema 对比")
     verify_parser.add_argument("--config", required=True, help="YAML 配置文件路径")
-    verify_parser.add_argument("--check-rds-config", default=None, dest="check_rds_config", help="多 DB 对比连接配置文件路径")
+    verify_parser.add_argument("--verify-rds-config", default=None, dest="verify_rds_config", help="多 DB 对比连接配置文件路径")
     verify_parser.add_argument("--service", nargs="*", default=None, help="指定本次校验的服务（默认全部）")
     verify_parser.add_argument("--log-level", default="INFO", help="日志级别")
 
@@ -83,8 +83,8 @@ def main():
         from server.config.loader import load_config
         app_config = load_config(args.config, args.service, logger)
 
-        from server.verify.executor import CheckExecutor
-        executor = CheckExecutor(app_config, logger, args.check_rds_config)
+        from server.verify.executor import VerifyExecutor
+        executor = VerifyExecutor(app_config, logger, args.verify_rds_config)
         executor.run()
 
     elif args.command == "migrate":

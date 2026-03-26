@@ -4,7 +4,7 @@
 #
 # Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the project root for details.
-"""check 子命令入口 — 连接测试 DB，执行 SQL 校验 + schema 对比"""
+"""verify 子命令入口 — 连接测试 DB，执行 SQL 校验 + schema 对比"""
 import json
 import os
 import subprocess
@@ -15,18 +15,17 @@ from typing import Optional
 import yaml
 import sqlparse
 
-from server.config.models import AppConfig
-from server.verify.check_config import CheckConfig
-from server.verify.rds.mariadb import CheckMariaDB
-from server.verify.rds.dm8 import CheckDM8
-from server.verify.rds.kdb9 import CheckKDB9
+from server.config.models import AppConfig, CheckRulesConfig
+from server.verify.rds.mariadb import VerifyMariaDB
+from server.verify.rds.dm8 import VerifyDM8
+from server.verify.rds.kdb9 import VerifyKDB9
 from server.db.dialect.base import RDSDialect
 from server.utils.version import VersionUtil
 
-_DEFAULT_RDS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "rds", "check_rds_config.yaml")
+_DEFAULT_RDS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "rds", "verify_rds_config.yaml")
 
 
-def _load_check_rds_config(config_path: Optional[str]) -> dict:
+def _load_verify_rds_config(config_path: Optional[str]) -> dict:
     path = config_path or _DEFAULT_RDS_CONFIG_PATH
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -36,19 +35,18 @@ def _validate_rds_config(rds_cfg: dict, required_db_types: list, config_path: st
     missing = [t for t in required_db_types if t not in rds_cfg]
     if missing:
         raise Exception(
-            f"check_rds_config.yaml 缺少以下数据库类型的连接配置: {missing}，"
+            f"verify_rds_config.yaml 缺少以下数据库类型的连接配置: {missing}，"
             f"配置文件路径: {config_path}"
         )
 
 
-class CheckExecutor:
-    def __init__(self, app_config: AppConfig, logger: Logger, check_rds_config_path: Optional[str] = None):
+class VerifyExecutor:
+    def __init__(self, app_config: AppConfig, logger: Logger, verify_rds_config_path: Optional[str] = None):
         self.app_config = app_config
         self.logger = logger
-        self.check_config = CheckConfig(app_config)
-        path = check_rds_config_path or _DEFAULT_RDS_CONFIG_PATH
-        self.rds_cfg = _load_check_rds_config(path)
-        _validate_rds_config(self.rds_cfg, app_config.db_types, path)
+        path = verify_rds_config_path or _DEFAULT_RDS_CONFIG_PATH
+        self.rds_cfg = _load_verify_rds_config(path)
+        _validate_rds_config(self.rds_cfg, self.app_config.db_types, path)
 
     def run(self):
         self.logger.info("开始验证数据模型脚本")
@@ -59,45 +57,45 @@ class CheckExecutor:
             self.logger.info(f"验证服务: {service_name}")
             repo_path = os.path.join(self.app_config.repo_path, service_name)
             check_from = service_cfg.check_from
-            if not self._check_repo(repo_path, check_from):
+            if not self._verify_repo(repo_path, check_from):
                 raise Exception(f"数据模型 {service_name} 验证失败")
 
         self.logger.info("数据模型验证成功")
 
-    def _create_check_rds(self, db_type: str, is_primary: bool = True) -> RDSDialect:
+    def _create_verify_rds(self, db_type: str, is_primary: bool = True) -> RDSDialect:
         section = self.rds_cfg[db_type]["primary" if is_primary else "secondary"]
         if db_type == "dm8":
-            return CheckDM8({**section, "DB_TYPE": "DM8"}, self.check_config, self.logger)
+            return VerifyDM8({**section, "DB_TYPE": "DM8"}, self.app_config.check_rules, self.logger)
         elif db_type == "mariadb":
-            return CheckMariaDB({**section, "DB_TYPE": "MARIADB"}, self.check_config, self.logger)
+            return VerifyMariaDB({**section, "DB_TYPE": "MARIADB"}, self.app_config.check_rules, self.logger)
         elif db_type == "kdb9":
-            return CheckKDB9({**section, "DB_TYPE": "KDB9"}, self.check_config, self.logger)
+            return VerifyKDB9({**section, "DB_TYPE": "KDB9"}, self.app_config.check_rules, self.logger)
         else:
             raise Exception(f"不支持的数据库类型: {db_type}")
 
     def _reset_schema(self):
         self.logger.info("重置数据模式")
-        for db_type in self.check_config.DBTypes:
-            primary = self._create_check_rds(db_type, is_primary=True)
-            secondary = self._create_check_rds(db_type, is_primary=False)
+        for db_type in self.app_config.db_types:
+            primary = self._create_verify_rds(db_type, is_primary=True)
+            secondary = self._create_verify_rds(db_type, is_primary=False)
             try:
-                primary.reset_schema(self.check_config.DATABASES)
-                secondary.reset_schema(self.check_config.DATABASES)
+                primary.reset_schema(self.app_config.databases)
+                secondary.reset_schema(self.app_config.databases)
             except Exception as e:
                 self.logger.error(f"reset_schema 失败: {db_type}, 错误: {e}")
                 raise
 
-    def _check_repo(self, repo_path: str, check_from: str) -> bool:
+    def _verify_repo(self, repo_path: str, check_from: str) -> bool:
         base_rds = None
-        for db_type in self.check_config.DBTypes:
-            primary = self._create_check_rds(db_type, is_primary=True)
-            secondary = self._create_check_rds(db_type, is_primary=False)
+        for db_type in self.app_config.db_types:
+            primary = self._create_verify_rds(db_type, is_primary=True)
+            secondary = self._create_verify_rds(db_type, is_primary=False)
 
             repo_db_path = os.path.join(repo_path, db_type)
             try:
-                self._check_db_type(repo_db_path, primary, secondary, check_from)
+                self._verify_db_type(repo_db_path, primary, secondary, check_from)
             except Exception as e:
-                self.logger.error(f"check_db_type 失败: {repo_db_path}, 错误: {e}")
+                self.logger.error(f"verify_db_type 失败: {repo_db_path}, 错误: {e}")
                 return False
 
             if base_rds is None:
@@ -107,8 +105,8 @@ class CheckExecutor:
 
         return True
 
-    def _check_db_type(self, repo_db_path: str, primary: RDSDialect,
-                       secondary: RDSDialect, check_from: str):
+    def _verify_db_type(self, repo_db_path: str, primary: RDSDialect,
+                        secondary: RDSDialect, check_from: str):
         versions = []
         for v in os.listdir(repo_db_path):
             try:
@@ -121,25 +119,25 @@ class CheckExecutor:
             from_version = VersionUtil(check_from)
             versions = [v for v in versions if v >= from_version]
 
-        if self.check_config.CheckType == CheckConfig.CheckLatest:
+        if self.app_config.check_rules.check_type == CheckRulesConfig.CheckLatest:
             if len(versions) >= 1:
                 versions = versions[-1:]
-        elif self.check_config.CheckType == CheckConfig.CheckRecently:
+        elif self.app_config.check_rules.check_type == CheckRulesConfig.CheckRecently:
             if len(versions) >= 2:
                 versions = versions[-2:]
 
         for i, version in enumerate(versions):
             version_dir = os.path.join(repo_db_path, version.VersionStr)
             if i == 0:
-                self._check_version_init(version_dir, primary)
+                self._verify_version_init(version_dir, primary)
             if len(versions) > 1:
-                self._check_version_upgrades(version_dir, primary)
+                self._verify_version_upgrades(version_dir, primary)
 
         if len(versions) >= 1:
             last_dir = os.path.join(repo_db_path, versions[-1].VersionStr)
-            self._check_version_init(last_dir, secondary)
+            self._verify_version_init(last_dir, secondary)
 
-    def _check_version_init(self, version_dir: str, check_rds: RDSDialect):
+    def _verify_version_init(self, version_dir: str, check_rds: RDSDialect):
         init_file = os.path.join(version_dir, "init.sql")
         if not os.path.isfile(init_file):
             return
@@ -153,7 +151,7 @@ class CheckExecutor:
         if sql_list:
             check_rds.run_sql(sql_list)
 
-    def _check_version_upgrades(self, version_dir: str, check_rds: RDSDialect):
+    def _verify_version_upgrades(self, version_dir: str, check_rds: RDSDialect):
         filenames = sorted(os.listdir(version_dir))
         for filename in filenames:
             if filename == "init.sql":
@@ -163,13 +161,13 @@ class CheckExecutor:
                 continue
 
             if filename.endswith(".json"):
-                self._check_json_file(filepath, check_rds)
+                self._verify_json_file(filepath, check_rds)
             elif filename.endswith(".sql"):
-                self._check_sql_file(filepath, check_rds)
+                self._verify_sql_file(filepath, check_rds)
             elif filename.endswith(".py"):
-                self._check_py_file(filepath, check_rds)
+                self._verify_py_file(filepath, check_rds)
 
-    def _check_sql_file(self, filepath: str, check_rds: RDSDialect):
+    def _verify_sql_file(self, filepath: str, check_rds: RDSDialect):
         self.logger.info(f"执行 SQL 文件: {filepath}")
         with open(filepath, "r", encoding="utf-8") as f:
             sqls_str = f.read()
@@ -179,7 +177,7 @@ class CheckExecutor:
         if sql_list:
             check_rds.run_sql(sql_list)
 
-    def _check_json_file(self, filepath: str, check_rds: RDSDialect):
+    def _verify_json_file(self, filepath: str, check_rds: RDSDialect):
         self.logger.info(f"执行 JSON 文件: {filepath}")
         with open(filepath, "r", encoding="utf-8") as f:
             try:
@@ -253,7 +251,7 @@ class CheckExecutor:
                 if operation_type == "DROP":
                     check_rds.drop_db(db_name)
 
-    def _check_py_file(self, filepath: str, check_rds: RDSDialect):
+    def _verify_py_file(self, filepath: str, check_rds: RDSDialect):
         self.logger.info(f"执行 Python 文件: {filepath}")
         try:
             custom_env = os.environ.copy()
@@ -281,7 +279,7 @@ class CheckExecutor:
     def _compare_schema(self, base_rds: RDSDialect, check_rds: RDSDialect):
         self.logger.info(f"对比数据库 schema 差异: {base_rds.DB_TYPE} -> {check_rds.DB_TYPE}")
 
-        for db_name in self.check_config.DATABASES:
+        for db_name in self.app_config.databases:
             base_tables = base_rds.list_tables_by_db(db_name)
             check_tables = check_rds.list_tables_by_db(db_name)
 
@@ -290,7 +288,7 @@ class CheckExecutor:
                 self.logger.error(f"对比库多出的表: {extra}, 基准库: {base_tables}, 对比库: {check_tables}")
                 raise Exception(f"数据库 {db_name} 表数量不一致, 对比库多出: {extra}")
 
-            if not self.check_config.AllowTableCompareDismatch:
+            if not self.app_config.check_rules.allow_table_compare_dismatch:
                 missing = set(base_tables) - set(check_tables)
                 if missing:
                     self.logger.error(f"对比库缺少的表: {missing}, 基准库: {base_tables}, 对比库: {check_tables}")
