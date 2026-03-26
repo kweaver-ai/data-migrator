@@ -126,13 +126,18 @@ class VerifyExecutor:
             if len(versions) >= 2:
                 versions = versions[-2:]
 
+        # primary 模拟升级路径：
+        #   - 第一个版本：执行 init.sql 建立初始 schema
+        #   - 后续版本：依次执行 upgrades，逐步演进到最新 schema
         for i, version in enumerate(versions):
             version_dir = os.path.join(repo_db_path, version.VersionStr)
             if i == 0:
                 self._verify_version_init(version_dir, primary)
-            if len(versions) > 1:
+            else:
                 self._verify_version_upgrades(version_dir, primary)
 
+        # secondary 模拟全新安装：直接执行最新版本的 init.sql
+        # 最终由 _compare_schema 对比两库，验证"升级路径 ≡ 全新安装"
         if len(versions) >= 1:
             last_dir = os.path.join(repo_db_path, versions[-1].VersionStr)
             self._verify_version_init(last_dir, secondary)
@@ -274,7 +279,8 @@ class VerifyExecutor:
             self.logger.info(f"运行 {filepath} 成功, result: {result}")
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Python 文件执行失败: {filepath}, 错误: {e.stderr}")
-            raise Exception(f"运行 Python 文件失败: {filepath}")
+            if not self.app_config.check_rules.allow_python_exception:
+                raise Exception(f"运行 Python 文件失败: {filepath}")
 
     def _compare_schema(self, base_rds: RDSDialect, check_rds: RDSDialect):
         self.logger.info(f"对比数据库 schema 差异: {base_rds.DB_TYPE} -> {check_rds.DB_TYPE}")
