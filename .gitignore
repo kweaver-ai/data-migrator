@@ -207,8 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 config.yaml
-verify_rds_config.yaml
-secret.yaml
+verify-rds-config.yaml
+secret-config.yaml
 
 repos/*
 source_code/*
