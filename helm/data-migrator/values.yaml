@@ -7,8 +7,8 @@ env:
 
 image:
   registry: acr.aishu.cn
-  repository: kweaver-core/data-migrator
-  tag: test
+  repository: kweaver-ai/data-migrator
+  tag: latest
   pullPolicy: IfNotPresent
 
 securityContext:
