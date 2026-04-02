@@ -13,7 +13,7 @@ import re
 from logging import Logger
 from typing import List, Optional, Tuple
 
-from server.config.models import AppConfig
+from server.config.models import AppConfig, DEFAULT_DB_TYPE_FALLBACK
 from server.utils.version import (
     compare_version, get_max_version, sort_versions, extract_number, is_version_dir
 )
@@ -25,12 +25,19 @@ class ScriptSelector:
         self.logger = logger
 
     def get_service_db_type_path(self, service_name: str) -> str:
-        """获取 <script_dir>/<service>/<db_type>/ 路径"""
-        return os.path.join(
+        """获取 <script_dir>/<service>/<db_type>/ 路径，目录不存在时 fallback 到 mariadb"""
+        path = os.path.join(
             self.app_config.repo_path,
             service_name,
             self.app_config.rds.type.lower(),
         )
+        if not os.path.isdir(path):
+            fallback = os.path.join(self.app_config.repo_path, service_name, DEFAULT_DB_TYPE_FALLBACK)
+            self.logger.warning(
+                f"目录 {path} 不存在，fallback 到 mariadb 目录: {fallback}"
+            )
+            return fallback
+        return path
 
     def get_all_versions(self, service_name: str) -> List[str]:
         """获取服务下所有版本目录"""

@@ -15,15 +15,15 @@ from typing import Optional
 import yaml
 import sqlparse
 
-from server.config.models import AppConfig, CheckRulesConfig
+from server.config.models import AppConfig, CheckRulesConfig, DEFAULT_DB_TYPE_FALLBACK
 from server.verify.rds.mariadb import VerifyMariaDB
+from server.verify.rds.mysql import VerifyMySQL
 from server.verify.rds.dm8 import VerifyDM8
 from server.verify.rds.kdb9 import VerifyKDB9
 from server.db.dialect.base import RDSDialect
 from server.utils.version import VersionUtil
 
 _DEFAULT_RDS_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "rds", "verify_rds_config.yaml")
-
 
 def _load_verify_rds_config(config_path: Optional[str]) -> dict:
     path = config_path or _DEFAULT_RDS_CONFIG_PATH
@@ -64,10 +64,12 @@ class VerifyExecutor:
 
     def _create_verify_rds(self, db_type: str, is_primary: bool = True) -> RDSDialect:
         section = self.rds_cfg[db_type]["primary" if is_primary else "secondary"]
-        if db_type == "dm8":
-            return VerifyDM8({**section, "DB_TYPE": "DM8"}, self.app_config.check_rules, self.logger)
-        elif db_type == "mariadb":
+        if db_type == "mariadb":
             return VerifyMariaDB({**section, "DB_TYPE": "MARIADB"}, self.app_config.check_rules, self.logger)
+        elif db_type == "mysql":
+            return VerifyMySQL({**section, "DB_TYPE": "MYSQL"}, self.app_config.check_rules, self.logger)
+        elif db_type == "dm8":
+            return VerifyDM8({**section, "DB_TYPE": "DM8"}, self.app_config.check_rules, self.logger)
         elif db_type == "kdb9":
             return VerifyKDB9({**section, "DB_TYPE": "KDB9"}, self.app_config.check_rules, self.logger)
         else:
@@ -92,6 +94,12 @@ class VerifyExecutor:
             secondary = self._create_verify_rds(db_type, is_primary=False)
 
             repo_db_path = os.path.join(repo_path, db_type)
+            if not os.path.isdir(repo_db_path):
+                fallback_path = os.path.join(repo_path, DEFAULT_DB_TYPE_FALLBACK)
+                self.logger.warning(
+                    f"目录 {repo_db_path} 不存在，fallback 到 mariadb 目录: {fallback_path}"
+                )
+                repo_db_path = fallback_path
             try:
                 self._verify_db_type(repo_db_path, primary, secondary, check_from)
             except Exception as e:

@@ -5,6 +5,7 @@
 # Licensed under the Apache License, Version 2.0.
 # See the LICENSE file in the project root for details.
 """MariaDB 方言 - DB 连接 + SQL 模板 + 幂等执行"""
+import re
 from logging import Logger
 
 from server.db.dialect.base import RDSDialect
@@ -49,9 +50,17 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
 
     # ── run_sql overrides ────────────────────────────────────────────────────
 
+    def _strip_if_exists(self, sql: str) -> str:
+        return re.sub(r'\bIF\s+EXISTS\b', '', sql, flags=re.IGNORECASE).strip()
+
+    def _strip_if_not_exists(self, sql: str) -> str:
+        return re.sub(r'\bIF\s+NOT\s+EXISTS\b', '', sql, flags=re.IGNORECASE).strip()
+
     def _run_sql_drop_index(self, cursor, current_db, sql, remaining):
         token, remaining = next_token(remaining)
+        has_if_exists = False
         if token.upper() == "IF":
+            has_if_exists = True
             _, remaining = next_token(remaining)
             token, remaining = next_token(remaining)
         idx_name = self.get_real_name(token)
@@ -60,8 +69,9 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
         tbl_name = self.get_real_name(tbl_token)
         check_sql = self.QUERY_INDEX_SQL.format(db_name=current_db, table_name=tbl_name, index_name=idx_name)
         if self._check_exists(cursor, check_sql):
-            self.logger.info(f"[SQL] {sql}")
-            cursor.execute(sql)
+            exec_sql = self._strip_if_exists(sql) if has_if_exists else sql
+            self.logger.info(f"[SQL] {exec_sql}")
+            cursor.execute(exec_sql)
         elif self.logger:
             self.logger.info(f"[run_sql] index {idx_name} 不存在, 跳过")
 
@@ -81,7 +91,9 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
 
         if action == "ADD" and obj_type_upper == "COLUMN":
             token, _ = next_token(remaining5)
+            has_if_not_exists = False
             if token.upper() == "IF":
+                has_if_not_exists = True
                 _, remaining5 = next_tokens(remaining5, 3)
                 token, _ = next_token(remaining5)
             col_name = self.get_real_name(token)
@@ -90,12 +102,15 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 已存在, 跳过")
             else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
+                exec_sql = self._strip_if_not_exists(sql) if has_if_not_exists else sql
+                self.logger.info(f"[SQL] {exec_sql}")
+                cursor.execute(exec_sql)
 
-        elif action == "DROP" and obj_type_upper == "COLUMN":
+        elif action in ("DROP", "MODIFY", "CHANGE", "RENAME") and obj_type_upper == "COLUMN":
             token, remaining6 = next_token(remaining5)
+            has_if_exists = False
             if token.upper() == "IF":
+                has_if_exists = True
                 _, remaining6 = next_token(remaining6)
                 token, _ = next_token(remaining6)
             col_name = self.get_real_name(token)
@@ -104,36 +119,9 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
             else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
-
-        elif action == "MODIFY" and obj_type_upper == "COLUMN":
-            token, remaining6 = next_token(remaining5)
-            if token.upper() == "IF":
-                _, remaining6 = next_token(remaining6)
-                token, _ = next_token(remaining6)
-            col_name = self.get_real_name(token)
-            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
-            if not self._check_exists(cursor, check_sql):
-                if self.logger:
-                    self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
-            else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
-
-        elif action == "RENAME" and obj_type_upper == "COLUMN":
-            token, remaining6 = next_token(remaining5)
-            if token.upper() == "IF":
-                _, remaining6 = next_token(remaining6)
-                token, _ = next_token(remaining6)
-            col_name = self.get_real_name(token)
-            check_sql = self.QUERY_COLUMN_SQL.format(db_name=current_db, table_name=tbl_name, column_name=col_name)
-            if not self._check_exists(cursor, check_sql):
-                if self.logger:
-                    self.logger.info(f"[run_sql] column {col_name} 不存在, 跳过")
-            else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
+                exec_sql = self._strip_if_exists(sql) if has_if_exists else sql
+                self.logger.info(f"[SQL] {exec_sql}")
+                cursor.execute(exec_sql)
 
         elif action == "RENAME" and obj_type_upper == "INDEX":
             idx_token, _ = next_token(remaining5)
@@ -147,19 +135,27 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 cursor.execute(sql)
 
         elif action == "ADD" and obj_type_upper == "CONSTRAINT":
-            constraint_token, _ = next_token(remaining5)
+            constraint_token, remaining6 = next_token(remaining5)
+            has_if_not_exists = False
+            if constraint_token.upper() == "IF":
+                has_if_not_exists = True
+                _, remaining6 = next_tokens(remaining5, 3)
+                constraint_token, _ = next_token(remaining6)
             constraint_name = self.get_real_name(constraint_token)
             check_sql = self.QUERY_CONSTRAINT_SQL.format(db_name=current_db, table_name=tbl_name, constraint_name=constraint_name)
             if self._check_exists(cursor, check_sql):
                 if self.logger:
                     self.logger.info(f"[run_sql] constraint {constraint_name} 已存在, 跳过")
             else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
+                exec_sql = self._strip_if_not_exists(sql) if has_if_not_exists else sql
+                self.logger.info(f"[SQL] {exec_sql}")
+                cursor.execute(exec_sql)
 
         elif action == "DROP" and obj_type_upper == "CONSTRAINT":
             token, remaining6 = next_token(remaining5)
+            has_if_exists = False
             if token.upper() == "IF":
+                has_if_exists = True
                 _, remaining6 = next_token(remaining6)
                 token, _ = next_token(remaining6)
             constraint_name = self.get_real_name(token)
@@ -168,8 +164,9 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
                 if self.logger:
                     self.logger.info(f"[run_sql] constraint {constraint_name} 不存在, 跳过")
             else:
-                self.logger.info(f"[SQL] {sql}")
-                cursor.execute(sql)
+                exec_sql = self._strip_if_exists(sql) if has_if_exists else sql
+                self.logger.info(f"[SQL] {exec_sql}")
+                cursor.execute(exec_sql)
 
         else:
             self.logger.info(f"[SQL] {sql}")
@@ -182,7 +179,9 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
             cursor.execute(sql)
             return
         token3, remaining3 = next_token(remaining2)
+        has_if_exists = False
         if token3.upper() == "IF":
+            has_if_exists = True
             _, remaining3 = next_token(remaining3)
             token3, _ = next_token(remaining3)
         tbl_name = self._parse_object_name(token3)
@@ -191,5 +190,6 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
             if self.logger:
                 self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")
         else:
-            self.logger.info(f"[SQL] {sql}")
-            cursor.execute(sql)
+            exec_sql = self._strip_if_exists(sql) if has_if_exists else sql
+            self.logger.info(f"[SQL] {exec_sql}")
+            cursor.execute(exec_sql)

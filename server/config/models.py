@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 
 
 VALID_SOURCE_TYPES = {"internal", "external"}
+DEFAULT_DB_TYPE_FALLBACK = "mariadb"
 
 
 @dataclass

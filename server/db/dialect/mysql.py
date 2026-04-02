@@ -11,7 +11,7 @@ from server.config.models import RDSConfig
 from server.db.dialect.mariadb import MariaDBDialect
 
 
-class MysqlDialect(MariaDBDialect):
+class MySQLDialect(MariaDBDialect):
     def __init__(self, rds_config: RDSConfig, logger: Logger):
         MariaDBDialect.__init__(self, rds_config, logger)
 

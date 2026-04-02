@@ -8,10 +8,10 @@
 from logging import Logger
 
 from server.config.models import RDSConfig
-from server.db.dialect.mysql import MysqlDialect
+from server.db.dialect.mysql import MySQLDialect
 
 
-class GoldenDBDialect(MysqlDialect):
+class GoldenDBDialect(MySQLDialect):
     def __init__(self, rds_config: RDSConfig, logger: Logger):
         super().__init__(rds_config, logger)
 

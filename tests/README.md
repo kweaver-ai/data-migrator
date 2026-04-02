@@ -165,14 +165,18 @@ pip install pytest
 ### 
 测试用的容器启动脚本
 
-docker run -d -p 5237:5236 --name dm8-1 -e SYSDBA_PWD=SYSDBA_dm001 -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
+docker run -d -p 5237:5236 --name dm8-1 -e SYSDBA_PWD= -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
 
-docker run -d -p 5238:5236 --name dm8-2 -e SYSDBA_PWD=SYSDBA_dm001 -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
+docker run -d -p 5238:5236 --name dm8-2 -e SYSDBA_PWD= -e UNICODE_FLAG=1 -e LENGTH_IN_CHAR=1 -e COMPATIBLE_MODE=4 -e CASE_SENSITIVE=0 -e PAGE_SIZE=16 -e LD_LIBRARY_PATH=/opt/dmdbms/bin dm8:dm8_20250206_rev257733_x86_rh6_64
 
-docker run -d -p 54322:54321 --privileged --name kingbase-1 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD=system kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
+docker run -d -p 54322:54321 --privileged --name kingbase-1 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD= kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
 
-docker run -d -p 54323:54321 --privileged --name kingbase-2 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD=system kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
+docker run -d -p 54323:54321 --privileged --name kingbase-2 --shm-size=4g -e TZ=Asia/Shanghai -e DB_MODE=mysql -e DB_USER=system -e DB_PASSWORD= kingbase_v008r006c009b0014_single:v1 /usr/sbin/init
 
-docker run -d -p 3330:3306 --name mariadb-1 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD=eisoo.com mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve
+docker run -d -p 3330:3306 --name mariadb-1 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD= mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve
 
-docker run -d -p 3331:3306 --name mariadb-2 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD=eisoo.com mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve
+docker run -d -p 3331:3306 --name mariadb-2 -e MARIADB_ROOT_USER=root -e MARIADB_ROOT_PASSWORD= mariadb:11.4.7 --lower-case-table-names=1 --skip-name-resolve
+
+docker run -d -p 3332:3306 --name mysql-1 -e MYSQL_ROOT_USER=root -e MYSQL_ROOT_PASSWORD= mysql:8.0.45 --lower-case-table-names=1 --skip-name-resolve
+
+docker run -d -p 3333:3306 --name mysql-2 -e MYSQL_ROOT_USER=root -e MYSQL_ROOT_PASSWORD= mysql:8.0.45 --lower-case-table-names=1 --skip-name-resolve

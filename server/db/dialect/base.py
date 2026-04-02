@@ -122,7 +122,7 @@ class RDSDialect(ABC):
         try:
             with self._connect() as conn:
                 with conn.cursor() as cursor:
-                    current_db = None
+                    current_db = ""
                     set_db_keyword = next_token(self.SET_DATABASE_SQL)[0].upper()
 
                     for sql in sql_list:
@@ -134,6 +134,7 @@ class RDSDialect(ABC):
                             exec_sql = self.SET_DATABASE_SQL.format(db_name=db.DBName)
                             self.logger.info(f"[SQL] {exec_sql}")
                             cursor.execute(exec_sql)
+                            current_db = db.DBName
 
                         elif token == "CREATE":
                             self._run_sql_create(cursor, current_db, sql, remaining)
