@@ -46,9 +46,9 @@ class LintDM8(DM8Parser, LintRDS):
                 if token2 == "TABLE":
                     self._parse_and_check_create_table(sql, db)
                 elif token2 == "UNIQUE":
-                    self._parse_and_check_create_unique_index(sql, db)
+                    self._parse_and_check_create_unique_index(sql, db, True)
                 elif token2 == "INDEX":
-                    self._parse_and_check_create_index(sql, db)
+                    self._parse_and_check_create_index(sql, db, True)
                 elif token2 == "VIEW":
                     continue
                 elif token2 == "OR":
@@ -60,8 +60,10 @@ class LintDM8(DM8Parser, LintRDS):
                     raise Exception(f"不合法的sql语句, 仅支持 'CREATE TABLE/VIEW/INDEX/UNIQUE INDEX': {sql}")
             elif token == "INSERT":
                 continue
+            elif token == "COMMENT":
+                self._parse_and_check_comment(sql, db, True)
             else:
-                raise Exception(f"不合法的sql语句, 仅支持 'SET', 'CREATE', 'INSERT': {sql}")
+                raise Exception(f"不合法的sql语句, 仅支持 'SET', 'CREATE', 'INSERT', 'COMMENT': {sql}")
 
     def check_update(self, sql_list: list):
         if not sql_list:
@@ -89,9 +91,9 @@ class LintDM8(DM8Parser, LintRDS):
                 if token2 == "TABLE":
                     self._parse_and_check_create_table(sql, db)
                 elif token2 == "UNIQUE":
-                    self._parse_and_check_create_unique_index(sql, db)
+                    self._parse_and_check_create_unique_index(sql, db, False)
                 elif token2 == "INDEX":
-                    self._parse_and_check_create_index(sql, db)
+                    self._parse_and_check_create_index(sql, db, False)
                 elif token2 == "VIEW":
                     continue
                 elif token2 == "OR":
@@ -113,20 +115,30 @@ class LintDM8(DM8Parser, LintRDS):
                 continue
             elif token in ("INSERT", "UPDATE", "DELETE"):
                 continue
+            elif token == "COMMENT":
+                self._parse_and_check_comment(sql, db, False)
             else:
                 raise Exception(f"不合法的sql语句: {sql}")
 
     # ── 建表解析与校验 ────────────────────────────────────────────────────────
 
     def _parse_and_check_create_table(self, sql: str, db: Database):
-        _, remaining_sql = next_tokens(sql, 2)  # skip CREATE TABLE
+        # CREATE TABLE [IF NOT EXISTS] table_name (...)
+        # IF NOT EXISTS 为可选语法
+        tokens, remaining_sql = next_tokens(sql, 2)
+        if len(tokens) != 2 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "TABLE":
+            raise Exception(f"建表语法错误: {sql}")
 
-        # skip optional IF NOT EXISTS
-        token, _ = next_token(remaining_sql)
+        # 检查可选的 IF NOT EXISTS
+        token, remaining_sql = next_token(remaining_sql)
         if token.upper() == "IF":
-            _, remaining_sql = next_tokens(remaining_sql, 3)  # skip IF NOT EXISTS
+            tokens, remaining_sql = next_tokens(remaining_sql, 2)
+            if len(tokens) != 2 or tokens[0].upper() != "NOT" or tokens[1].upper() != "EXISTS":
+                raise Exception(f"建表语法错误, IF NOT EXISTS 格式不正确: {sql}")
+            table_name_tok, remaining_sql = next_token(remaining_sql)
+        else:
+            table_name_tok = token
 
-        table_name_tok, remaining_sql = next_token(remaining_sql)
         table_name = self.get_real_name(table_name_tok)
         table = Table(table_name, self.logger)
         # remaining_sql now starts with "(...)", 兼容开括号换行写法
@@ -180,48 +192,113 @@ class LintDM8(DM8Parser, LintRDS):
             column = self.parse_sql_column_define(first_token, remaining_sql)
             table.add_column(column)
 
-    def _parse_and_check_create_unique_index(self, sql: str, db: Database):
-        tokens, remaining_sql = next_tokens(sql, 6)
-        if (len(tokens) != 6 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "UNIQUE"
-                or tokens[2].upper() != "INDEX" or tokens[3].upper() != "IF"
-                or tokens[4].upper() != "NOT" or tokens[5].upper() != "EXISTS"):
+    def _parse_and_check_create_unique_index(self, sql: str, db: Database, check_table: bool):
+        # CREATE UNIQUE INDEX [IF NOT EXISTS] index_name ON table_name (...)
+        # IF NOT EXISTS 为可选语法
+        tokens, remaining_sql = next_tokens(sql, 3)
+        if len(tokens) != 3 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "UNIQUE" or tokens[2].upper() != "INDEX":
             raise Exception(f"唯一索引语法错误: {sql}")
-        index_name, remaining_sql = next_token(remaining_sql)
-        index_name = self.get_real_name(index_name)
-        token, remaining_sql = next_token(remaining_sql)
-        if token.upper() != "ON":
-            raise Exception(f"唯一索引语法错误: {sql}")
-        table_name, remaining_sql = next_token(remaining_sql)
-        table_name = self.get_real_name(table_name)
-        table = db.get_table(table_name)
-        if not table:
-            raise Exception(f"表不存在: {table_name}")
-        ridx = remaining_sql.rfind(")")
-        index = UniqueIndex(table.TableName, index_name, self.logger)
-        for col in remaining_sql[1:ridx].split(","):
-            index.add_column(self.get_real_column_name(col.strip()))
-        table.add_index(index)
 
-    def _parse_and_check_create_index(self, sql: str, db: Database):
-        tokens, remaining_sql = next_tokens(sql, 5)
-        if (len(tokens) != 5 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "INDEX"
-                or tokens[2].upper() != "IF" or tokens[3].upper() != "NOT" or tokens[4].upper() != "EXISTS"):
+        # 检查可选的 IF NOT EXISTS
+        token, remaining_sql = next_token(remaining_sql)
+        if token.upper() == "IF":
+            tokens, remaining_sql = next_tokens(remaining_sql, 2)
+            if len(tokens) != 2 or tokens[0].upper() != "NOT" or tokens[1].upper() != "EXISTS":
+                raise Exception(f"唯一索引语法错误, IF NOT EXISTS 格式不正确: {sql}")
+            index_name, remaining_sql = next_token(remaining_sql)
+        else:
+            index_name = token
+
+        index_name = self.get_real_name(index_name)
+        token, remaining_sql = next_token(remaining_sql)
+        if token.upper() != "ON":
+            raise Exception(f"唯一索引语法错误: {sql}")
+        if check_table:
+            table_name, remaining_sql = next_token(remaining_sql)
+            table_name = self.get_real_name(table_name)
+            table = db.get_table(table_name)
+            if not table:
+                raise Exception(f"表不存在: {table_name}")
+            ridx = remaining_sql.rfind(")")
+            index = UniqueIndex(table.TableName, index_name, self.logger)
+            for col in remaining_sql[1:ridx].split(","):
+                index.add_column(self.get_real_column_name(col.strip()))
+            table.add_index(index)
+
+    def _parse_and_check_create_index(self, sql: str, db: Database, check_table: bool):
+        # CREATE INDEX [IF NOT EXISTS] index_name ON table_name (...)
+        # IF NOT EXISTS 为可选语法
+        tokens, remaining_sql = next_tokens(sql, 2)
+        if len(tokens) != 2 or tokens[0].upper() != "CREATE" or tokens[1].upper() != "INDEX":
             raise Exception(f"普通索引语法错误: {sql}")
-        index_name, remaining_sql = next_token(remaining_sql)
+
+        # 检查可选的 IF NOT EXISTS
+        token, remaining_sql = next_token(remaining_sql)
+        if token.upper() == "IF":
+            tokens, remaining_sql = next_tokens(remaining_sql, 2)
+            if len(tokens) != 2 or tokens[0].upper() != "NOT" or tokens[1].upper() != "EXISTS":
+                raise Exception(f"普通索引语法错误, IF NOT EXISTS 格式不正确: {sql}")
+            index_name, remaining_sql = next_token(remaining_sql)
+        else:
+            index_name = token
+
         index_name = self.get_real_name(index_name)
         token, remaining_sql = next_token(remaining_sql)
         if token.upper() != "ON":
             raise Exception(f"普通索引语法错误: {sql}")
-        table_name, remaining_sql = next_token(remaining_sql)
-        table_name = self.get_real_name(table_name)
-        table = db.get_table(table_name)
-        if not table:
-            raise Exception(f"表不存在: {table_name}")
-        ridx = remaining_sql.rfind(")")
-        index = Index(table.TableName, index_name, self.logger)
-        for col in remaining_sql[1:ridx].split(","):
-            index.add_column(self.get_real_column_name(col.strip()))
-        table.add_index(index)
+        if check_table:
+            table_name, remaining_sql = next_token(remaining_sql)
+            table_name = self.get_real_name(table_name)
+            table = db.get_table(table_name)
+            if not table:
+                raise Exception(f"表不存在: {table_name}")
+            ridx = remaining_sql.rfind(")")
+            index = Index(table.TableName, index_name, self.logger)
+            for col in remaining_sql[1:ridx].split(","):
+                index.add_column(self.get_real_column_name(col.strip()))
+            table.add_index(index)
+
+    def _parse_and_check_comment(self, sql: str, db: Database, check_table: bool):
+        """解析 COMMENT ON TABLE/COLUMN 语句"""
+        tokens, remaining_sql = next_tokens(sql, 5)
+        if len(tokens) < 5 or tokens[0].upper() != "COMMENT" or tokens[1].upper() != "ON":
+            raise Exception(f"COMMENT 语法错误: {sql}")
+
+        obj_type = tokens[2].upper()
+        if obj_type == "TABLE":
+            # COMMENT ON TABLE table_name IS 'comment'
+            table_name = self.get_real_name(tokens[3])
+            if tokens[4].upper() != "IS":
+                raise Exception(f"COMMENT 语法错误, 缺少 IS 关键字: {sql}")
+            comment = remaining_sql.strip(" '")
+            if not comment:
+                raise Exception(f"COMMENT 语法错误, 注释内容不能为空: {sql}")
+            if check_table:
+                table = db.get_table(table_name)
+                if not table:
+                    raise Exception(f"COMMENT ON TABLE 失败, 表不存在: {table_name}")
+
+        elif obj_type == "COLUMN":
+            # COMMENT ON COLUMN table.column IS 'comment'
+            qualified_name = tokens[3]
+            if "." not in qualified_name:
+                raise Exception(f"COMMENT ON COLUMN 语法错误, 必须使用 'table.column' 格式: {sql}")
+            table_name, column_name = qualified_name.rsplit(".", 1)
+            table_name = self.get_real_name(table_name)
+            column_name = self.get_real_name(column_name)
+            if tokens[4].upper() != "IS":
+                raise Exception(f"COMMENT 语法错误, 缺少 IS 关键字: {sql}")
+            comment = remaining_sql.strip(" '")
+            if not comment:
+                raise Exception(f"COMMENT 语法错误, 注释内容不能为空: {sql}")
+            if check_table:
+                table = db.get_table(table_name)
+                if not table:
+                    raise Exception(f"COMMENT ON COLUMN 失败, 表不存在: {table_name}")
+                if column_name not in table.Columns:
+                    raise Exception(f"COMMENT ON COLUMN 失败, 列 '{column_name}' 在表 '{table_name}' 中不存在")
+        else:
+            raise Exception(f"COMMENT 语法错误, 仅支持 'COMMENT ON TABLE' 和 'COMMENT ON COLUMN': {sql}")
 
     def _check_table(self, table: Table):
         if table.PrimaryIndex is None:
