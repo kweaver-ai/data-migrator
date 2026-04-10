@@ -28,7 +28,7 @@ class KDB9Parser(RDSParser):
             raise Exception(f"名称中包含不合法字符: {name}")
         return real_name
 
-    def parse_sql_use_db(self, sql: str):
+    def parse_sql_use_db(self, sql: str) -> Database:
         tokens, _ = next_tokens(sql, 4)
         if (len(tokens) != 4 or tokens[0].upper() != "SET"
                 or tokens[1].upper() != "SEARCH_PATH" or tokens[2].upper() != "TO"):

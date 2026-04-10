@@ -28,7 +28,7 @@ class DM8Parser(RDSParser):
             raise Exception(f"名称中包含不合法字符: {name}")
         return real_name
 
-    def parse_sql_use_db(self, sql: str):
+    def parse_sql_use_db(self, sql: str) -> Database:
         tokens, _ = next_tokens(sql, 3)
         if len(tokens) != 3 or tokens[0].upper() != "SET" or tokens[1].upper() != "SCHEMA":
             raise Exception(f"不合法的 SET SCHEMA 语句: {sql}")

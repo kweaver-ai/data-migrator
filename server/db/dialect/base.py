@@ -8,6 +8,7 @@
 import os
 from abc import ABC, abstractmethod
 from logging import Logger
+from server.utils.table_define import Database
 
 try:
     import rdsdriver
@@ -75,7 +76,7 @@ class RDSDialect(ABC):
         pass
 
     @abstractmethod
-    def parse_sql_use_db(self, sql: str):
+    def parse_sql_use_db(self, sql: str) -> Database:
         """解析切库语句（USE / SET SCHEMA / SET SEARCH_PATH TO），返回 Database 对象"""
         pass
 
@@ -123,13 +124,13 @@ class RDSDialect(ABC):
             with self._connect() as conn:
                 with conn.cursor() as cursor:
                     current_db = ""
-                    set_db_keyword = next_token(self.SET_DATABASE_SQL)[0].upper()
+                    set_db_prefix = self.SET_DATABASE_SQL.split("{db_name}")[0].upper().strip() if self.SET_DATABASE_SQL else ""
 
                     for sql in sql_list:
                         token, remaining = next_token(sql)
                         token = token.upper()
 
-                        if token == set_db_keyword:
+                        if set_db_prefix and sql.upper().lstrip().startswith(set_db_prefix + " "):
                             db = self.parse_sql_use_db(sql)
                             exec_sql = self.SET_DATABASE_SQL.format(db_name=db.DBName)
                             self.logger.info(f"[SQL] {exec_sql}")

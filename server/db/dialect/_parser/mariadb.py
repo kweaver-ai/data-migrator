@@ -28,7 +28,7 @@ class MariaDBParser(RDSParser):
             raise Exception(f"名称中包含不合法字符: {name}")
         return real_name
 
-    def parse_sql_use_db(self, sql: str):
+    def parse_sql_use_db(self, sql: str) -> Database:
         tokens, _ = next_tokens(sql, 2)
         if len(tokens) != 2 or tokens[0].upper() != "USE":
             raise Exception(f"不合法的 USE 语句: {sql}")
