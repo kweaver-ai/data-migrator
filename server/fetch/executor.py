@@ -34,17 +34,24 @@ class FetchExecutor:
         source_path = os.path.join(os.getcwd(), "source_code")
         os.makedirs(source_path, exist_ok=True)
 
-        for service_name, service_cfg in self.app_config.services.items():
-            project = service_cfg.project
-            repo = service_cfg.repo
-            ref = service_cfg.ref
-            sparse_path = service_cfg.path
+        # 按 (project, repo, ref) 分组，收集所有路径
+        repo_groups: dict[tuple, list[str]] = {}
+        for service_cfg in self.app_config.services.values():
+            key = (service_cfg.project, service_cfg.repo, service_cfg.ref)
+            repo_groups.setdefault(key, []).append(service_cfg.path)
 
+        for (project, repo, ref), sparse_paths in repo_groups.items():
             self.logger.info(f"拉取代码库: {project}/{repo}, 分支: {ref}")
 
-            service_path = os.path.join(source_path, service_name)
-            if os.path.exists(service_path):
-                self.logger.info(f"本地目录已存在: {service_path}")
+            service_path = os.path.join(source_path, project, repo)
+
+            # 只处理尚未存在的路径
+            missing_paths = [
+                p for p in sparse_paths
+                if not os.path.exists(os.path.join(service_path, p))
+            ]
+            if not missing_paths:
+                self.logger.info(f"所有路径已存在，跳过: {project}/{repo}")
                 continue
 
             pat = os.getenv("MY_PAT", "")
@@ -52,7 +59,7 @@ class FetchExecutor:
                 raise Exception("环境变量 MY_PAT 未设置，无法认证 GitHub")
 
             git_url = f"https://{pat}@github.com/{project}/{repo}.git"
-            tmp_path = os.path.join(source_path, f"{service_name}_tmp")
+            tmp_path = os.path.join(source_path, f"{project}_{repo}_tmp")
 
             try:
                 # 浅克隆，不自动 checkout
@@ -65,16 +72,18 @@ class FetchExecutor:
                     no_checkout=True,
                 )
 
-                # 配置 sparse-checkout，只检出指定目录
+                # 一次性 sparse-checkout 所有缺失路径
                 cloned_repo.git.sparse_checkout("init", "--cone")
-                cloned_repo.git.sparse_checkout("set", sparse_path)
+                cloned_repo.git.sparse_checkout("set", *missing_paths)
                 cloned_repo.git.checkout(ref)
 
-                # 将目标目录移动到最终位置
-                src_dir = os.path.join(tmp_path, sparse_path)
+                # 将各路径移动到最终位置
                 os.makedirs(service_path, exist_ok=True)
-                dest_dir = os.path.join(service_path, sparse_path)
-                shutil.move(src_dir, dest_dir)
+                for sparse_path in missing_paths:
+                    src_dir = os.path.join(tmp_path, sparse_path)
+                    dest_dir = os.path.join(service_path, sparse_path)
+                    os.makedirs(os.path.dirname(dest_dir), exist_ok=True)
+                    shutil.move(src_dir, dest_dir)
 
                 self.logger.info(f"拉取成功: {project}/{repo} -> {service_path}")
             except git.GitCommandError as e:
@@ -98,7 +107,7 @@ class FetchExecutor:
 
             self.logger.info(f"复制代码库目录: {service_name}, path={db_path}")
 
-            source_path = os.path.join(os.getcwd(), "source_code", service_name, db_path)
+            source_path = os.path.join(os.getcwd(), "source_code", service_cfg.project, service_cfg.repo, db_path)
             repo_path = os.path.join(self.app_config.repo_path, service_name)
             os.makedirs(repo_path, exist_ok=True)
 
