@@ -185,11 +185,12 @@ class MariaDBDialect(MariaDBParser, RDSDialect):
             _, remaining3 = next_token(remaining3)
             token3, _ = next_token(remaining3)
         tbl_name = self._parse_object_name(token3)
-        check_sql = self.QUERY_TABLE_SQL.format(db_name=current_db, table_name=tbl_name)
-        if not self._check_exists(cursor, check_sql):
-            if self.logger:
-                self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")
-        else:
+        src_db = self.get_real_name(token3.split(".")[0]) if "." in token3 else current_db
+        check_sql = self.QUERY_TABLE_SQL.format(db_name=src_db, table_name=tbl_name)
+        if self._check_exists(cursor, check_sql):
             exec_sql = self._strip_if_exists(sql) if has_if_exists else sql
             self.logger.info(f"[SQL] {exec_sql}")
             cursor.execute(exec_sql)
+        else:
+            if self.logger:
+                self.logger.info(f"[run_sql] table {tbl_name} 不存在, 跳过")

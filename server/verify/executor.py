@@ -321,13 +321,18 @@ class VerifyExecutor:
 
                 base_cols = base_rds.get_table_columns(db_name, table)
                 check_cols = check_rds.get_table_columns(db_name, table)
-                if len(base_cols) != len(check_cols):
-                    self.logger.error(f"基准库的列: {base_cols}, 对比库的列: {check_cols}")
-                    raise Exception(f"表 {db_name}.{table} 列数量不一致")
+                only_in_base = set(base_cols) - set(check_cols)
+                only_in_check = set(check_cols) - set(base_cols)
+                if only_in_base:
+                    self.logger.error(f"表 {db_name}.{table} 仅在基准({base_rds.DB_TYPE})中存在的列: {sorted(only_in_base)}")
+                    raise Exception(f"表 {db_name}.{table} 列不一致: 仅基准有 {sorted(only_in_base)}")
+                if only_in_check:
+                    self.logger.error(f"表 {db_name}.{table} 仅在对比({check_rds.DB_TYPE})中存在的列: {sorted(only_in_check)}")
+                    raise Exception(f"表 {db_name}.{table} 列不一致: 仅对比有 {sorted(only_in_check)}")
 
                 for col_name, base_col in base_cols.items():
                     if col_name not in check_cols:
-                        raise Exception(f"表 {db_name}.{table} 列 {col_name} 在对比库中不存在")
+                        continue
 
                     base_type, base_category = base_rds.get_column_type(base_col)
                     check_type, check_category = check_rds.get_column_type(check_col := check_cols[col_name])
