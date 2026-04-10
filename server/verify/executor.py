@@ -88,28 +88,36 @@ class VerifyExecutor:
                 raise
 
     def _verify_repo(self, repo_path: str, check_from: str) -> bool:
-        base_rds = None
+        # mariadb 永远作为 base，先单独初始化
+        mariadb_primary = self._create_verify_rds(DEFAULT_DB_TYPE_FALLBACK, is_primary=True)
+        mariadb_secondary = self._create_verify_rds(DEFAULT_DB_TYPE_FALLBACK, is_primary=False)
+        mariadb_path = os.path.join(repo_path, DEFAULT_DB_TYPE_FALLBACK)
+        try:
+            self._verify_db_type(mariadb_path, mariadb_primary, mariadb_secondary, check_from)
+        except Exception as e:
+            self.logger.error(f"verify_db_type 失败: {mariadb_path}, 错误: {e}")
+            return False
+
         for db_type in self.app_config.db_types:
+            if db_type == DEFAULT_DB_TYPE_FALLBACK:
+                continue
+
             primary = self._create_verify_rds(db_type, is_primary=True)
             secondary = self._create_verify_rds(db_type, is_primary=False)
 
             repo_db_path = os.path.join(repo_path, db_type)
             if not os.path.isdir(repo_db_path):
-                fallback_path = os.path.join(repo_path, DEFAULT_DB_TYPE_FALLBACK)
                 self.logger.warning(
-                    f"目录 {repo_db_path} 不存在，fallback 到 mariadb 目录: {fallback_path}"
+                    f"目录 {repo_db_path} 不存在，fallback 到 mariadb 目录: {mariadb_path}"
                 )
-                repo_db_path = fallback_path
+                repo_db_path = mariadb_path
             try:
                 self._verify_db_type(repo_db_path, primary, secondary, check_from)
             except Exception as e:
                 self.logger.error(f"verify_db_type 失败: {repo_db_path}, 错误: {e}")
                 return False
 
-            if base_rds is None:
-                base_rds = primary
-            else:
-                self._compare_schema(base_rds, primary)
+            self._compare_schema(mariadb_primary, primary)
 
         return True
 
@@ -299,14 +307,12 @@ class VerifyExecutor:
 
             extra = set(check_tables) - set(base_tables)
             if extra:
-                self.logger.error(f"对比库多出的表: {extra}, 基准库: {base_tables}, 对比库: {check_tables}")
-                raise Exception(f"数据库 {db_name} 表数量不一致, 对比库多出: {extra}")
+                self.logger.warning(f"对比库多出的表(允许): {extra}")
 
-            if not self.app_config.check_rules.allow_table_compare_dismatch:
-                missing = set(base_tables) - set(check_tables)
-                if missing:
-                    self.logger.error(f"对比库缺少的表: {missing}, 基准库: {base_tables}, 对比库: {check_tables}")
-                    raise Exception(f"数据库 {db_name} 表数量不一致, 对比库缺少: {missing}")
+            missing = set(base_tables) - set(check_tables)
+            if missing:
+                self.logger.error(f"对比库缺少的表: {missing}, 基准库: {base_tables}, 对比库: {check_tables}")
+                raise Exception(f"数据库 {db_name} 表数量不一致, 对比库缺少: {missing}")
 
             for table in base_tables:
                 if table not in check_tables:

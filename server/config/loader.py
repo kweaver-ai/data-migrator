@@ -52,7 +52,6 @@ def _load_check_rules(cfg: dict) -> CheckRulesConfig:
         allow_none_primary_key=raw_rules.get("allow_none_primary_key", False),
         allow_foreign_key=raw_rules.get("allow_foreign_key", False),
         allow_python_exception=raw_rules.get("allow_python_exception", False),
-        allow_table_compare_dismatch=raw_rules.get("allow_table_compare_dismatch", False),
     )
 
 

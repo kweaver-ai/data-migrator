@@ -54,7 +54,6 @@ class CheckRulesConfig:
     allow_none_primary_key: bool = False
     allow_foreign_key: bool = False
     allow_python_exception: bool = False
-    allow_table_compare_dismatch: bool = False
 
 
 @dataclass
