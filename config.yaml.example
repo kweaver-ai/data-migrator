@@ -19,7 +19,6 @@ check_rules:
   allow_none_primary_key: false
   allow_foreign_key: false
   allow_python_exception: false
-  allow_table_compare_dismatch: false
   
 
 renamed_services:
