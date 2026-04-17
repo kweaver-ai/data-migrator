@@ -101,7 +101,8 @@ class RDSDialect(ABC):
     def _check_exists(self, cursor, query: str) -> bool:
         self.logger.info(f"[SQL] {query}")
         cursor.execute(query)
-        return len(cursor.fetchall()) > 0
+        result = cursor.fetchall()
+        return len(result) > 0
 
     def _parse_object_name(self, qualified_name: str) -> str:
         """从 db.object 或 "db"."object" 中提取最后一段对象名"""
@@ -152,6 +153,7 @@ class RDSDialect(ABC):
                         else:
                             self.logger.info(f"[SQL] {sql}")
                             cursor.execute(sql)
+                    cursor.commit()
 
         except Exception as e:
             raise Exception(f"run_sql 失败, DB_TYPE: {self.DB_TYPE}, 错误: {e}") from e
@@ -252,6 +254,7 @@ class RDSDialect(ABC):
             self.logger.info(f"[SQL] {sql}")
             cursor.execute(sql)
             return
+
         token, remaining2 = next_token(remaining)
         if token.upper() == "IF":
             _, remaining2 = next_tokens(remaining2, 2)
@@ -302,6 +305,7 @@ class RDSDialect(ABC):
                             column_property=column_property, column_comment=column_comment)
                         self.logger.info(f"[SQL] {add_sql}")
                         cursor.execute(add_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"add_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -319,6 +323,7 @@ class RDSDialect(ABC):
                             column_property=column_property, column_comment=column_comment)
                         self.logger.info(f"[SQL] {modify_sql}")
                         cursor.execute(modify_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"modify_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -336,6 +341,7 @@ class RDSDialect(ABC):
                             new_name=new_name, column_property=column_property, column_comment=column_comment)
                         self.logger.info(f"[SQL] {rename_sql}")
                         cursor.execute(rename_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"rename_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -352,6 +358,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name, column_name=column_name)
                         self.logger.info(f"[SQL] {drop_sql}")
                         cursor.execute(drop_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"drop_column: {db_name}.{table_name}.{column_name} 失败: {e}") from e
 
@@ -372,6 +379,7 @@ class RDSDialect(ABC):
                             index_name=index_name, index_property=index_property, index_comment=index_comment)
                         self.logger.info(f"[SQL] {add_sql}")
                         cursor.execute(add_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"add_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -393,6 +401,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name, index_name=index_name, new_name=new_name)
                         self.logger.info(f"[SQL] {rename_sql}")
                         cursor.execute(rename_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"rename_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -412,6 +421,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name, index_name=index_name)
                         self.logger.info(f"[SQL] {drop_sql}")
                         cursor.execute(drop_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"drop_index: {db_name}.{table_name}.{index_name} 失败: {e}") from e
 
@@ -434,6 +444,7 @@ class RDSDialect(ABC):
                             constraint_name=constraint_name, constraint_property=constraint_property)
                         self.logger.info(f"[SQL] {add_sql}")
                         cursor.execute(add_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"add_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -456,6 +467,7 @@ class RDSDialect(ABC):
                             constraint_name=constraint_name, new_name=new_name)
                         self.logger.info(f"[SQL] {rename_sql}")
                         cursor.execute(rename_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"rename_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -477,6 +489,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name, constraint_name=constraint_name)
                         self.logger.info(f"[SQL] {drop_sql}")
                         cursor.execute(drop_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"drop_constraint: {db_name}.{table_name}.{constraint_name} 失败: {e}") from e
 
@@ -493,6 +506,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name, new_name=new_name)
                         self.logger.info(f"[SQL] {rename_sql}")
                         cursor.execute(rename_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"rename_table: {db_name}.{table_name} 失败: {e}") from e
 
@@ -509,6 +523,7 @@ class RDSDialect(ABC):
                             db_name=db_name, table_name=table_name)
                         self.logger.info(f"[SQL] {drop_sql}")
                         cursor.execute(drop_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"drop_table: {db_name}.{table_name} 失败: {e}") from e
 
@@ -519,6 +534,7 @@ class RDSDialect(ABC):
                     drop_sql = self.DROP_DATABASE_SQL.format(db_name=db_name)
                     self.logger.info(f"[SQL] {drop_sql}")
                     cursor.execute(drop_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"drop_db: {db_name} 失败: {e}") from e
 
@@ -530,6 +546,7 @@ class RDSDialect(ABC):
                     create_sql = self.CREATE_DATABASE_SQL.format(db_name=db_name)
                     self.logger.info(f"[SQL] {create_sql}")
                     cursor.execute(create_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"create_db: {db_name} 失败: {e}") from e
 
@@ -550,6 +567,7 @@ class RDSDialect(ABC):
                         create_sql = self.CREATE_DATABASE_SQL.format(db_name=db_name)
                         self.logger.info(f"[SQL] {create_sql}")
                         cursor.execute(create_sql)
+                    cursor.commit()
         except Exception as e:
             raise Exception(f"reset_schema: {db_names} 失败: {e}") from e
 
@@ -560,6 +578,7 @@ class RDSDialect(ABC):
                     self.logger.info(f"[SQL] {self.QUERY_DATABASES_SQL}")
                     cursor.execute(self.QUERY_DATABASES_SQL)
                     names = [row[0].upper() for row in cursor.fetchall()]
+                    cursor.commit()
                     return db_name.upper() in names
         except Exception as e:
             raise Exception(f"db_exists: {db_name} 检查失败: {e}") from e
@@ -572,7 +591,9 @@ class RDSDialect(ABC):
                         db_name=db_name, table_name=table_name)
                     self.logger.info(f"[SQL] {query_sql}")
                     cursor.execute(query_sql)
-                    return len(cursor.fetchall()) > 0
+                    result = cursor.fetchall()
+                    cursor.commit()
+                    return len(result) > 0
         except Exception as e:
             raise Exception(f"table_exists: {db_name}.{table_name} 检查失败: {e}") from e
 
@@ -583,7 +604,9 @@ class RDSDialect(ABC):
                     query_sql = self.QUERY_TABLES_SQL.format(db_name=db_name)
                     self.logger.info(f"[SQL] {query_sql}")
                     cursor.execute(query_sql)
-                    return [row[0] for row in cursor.fetchall()]
+                    result = cursor.fetchall()
+                    cursor.commit()
+                    return [row[0] for row in result]
         except Exception as e:
             raise Exception(f"list_tables_by_db: {db_name} 失败: {e}") from e
 
@@ -600,6 +623,7 @@ class RDSDialect(ABC):
                         row_dict = dict(zip(columns, row))
                         col_name = row_dict[self.COLUMN_NAME_FIELD].upper()
                         schema[col_name] = row_dict
+                    cursor.commit()
                     return schema
         except Exception as e:
             raise Exception(f"get_table_columns: {db_name}.{table_name} 失败: {e}") from e
